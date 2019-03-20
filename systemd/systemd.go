@@ -30,7 +30,7 @@ var (
 	errConvertUint64PropertyMsg = "couldn't convert unit's %s property %v to uint64"
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
-	errUnitMetricsMsg           = "couldn't get units %s tasks metrics %s"
+	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
 )
 
 type Collector struct {
@@ -58,7 +58,7 @@ type Collector struct {
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
-func NewCollector() (*Collector, error) {
+func NewCollector(logger log.Logger) (*Collector, error) {
 	unitDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_state"),
 		"Systemd unit", []string{"name", "state", "type"}, nil,
@@ -137,6 +137,7 @@ func NewCollector() (*Collector, error) {
 	unitBlacklistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitBlacklist))
 
 	return &Collector{
+		logger:                        logger,
 		unitDesc:                      unitDesc,
 		unitStartTimeDesc:             unitStartTimeDesc,
 		unitTasksCurrentDesc:          unitTasksCurrentDesc,
@@ -160,39 +161,39 @@ func NewCollector() (*Collector, error) {
 }
 
 // Collect gathers metrics from systemd.
-func (sc *Collector) Collect(ch chan<- prometheus.Metric) {
-	err := sc.collect(ch)
+func (c *Collector) Collect(ch chan<- prometheus.Metric) {
+	err := c.collect(ch)
 	if err != nil {
-		sc.logger.Error(err)
+		c.logger.Error(err)
 	}
 }
 
 // Describe gathers descriptions of Metrics
-func (sc *Collector) Describe(desc chan<- *prometheus.Desc) {
-	desc <- sc.unitDesc
-	desc <- sc.unitStartTimeDesc
-	desc <- sc.unitTasksCurrentDesc
-	desc <- sc.unitTasksMaxDesc
-	desc <- sc.systemRunningDesc
-	desc <- sc.summaryDesc
-	desc <- sc.nRestartsDesc
-	desc <- sc.timerLastTriggerDesc
-	desc <- sc.socketAcceptedConnectionsDesc
-	desc <- sc.socketCurrentConnectionsDesc
-	desc <- sc.socketRefusedConnectionsDesc
-	desc <- sc.cpuTotalDesc
-	desc <- sc.openFDs
-	desc <- sc.maxFDs
-	desc <- sc.vsize
-	desc <- sc.maxVsize
-	desc <- sc.rss
+func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
+	desc <- c.unitDesc
+	desc <- c.unitStartTimeDesc
+	desc <- c.unitTasksCurrentDesc
+	desc <- c.unitTasksMaxDesc
+	desc <- c.systemRunningDesc
+	desc <- c.summaryDesc
+	desc <- c.nRestartsDesc
+	desc <- c.timerLastTriggerDesc
+	desc <- c.socketAcceptedConnectionsDesc
+	desc <- c.socketCurrentConnectionsDesc
+	desc <- c.socketRefusedConnectionsDesc
+	desc <- c.cpuTotalDesc
+	desc <- c.openFDs
+	desc <- c.maxFDs
+	desc <- c.vsize
+	desc <- c.maxVsize
+	desc <- c.rss
 }
 
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
 	if err != nil {
-		return fmt.Errorf("couldn't get dbus connection: %s", err)
+		return errors.Wrapf(err, "couldn't get dbus connection")
 	}
 	defer conn.Close()
 
@@ -201,63 +202,63 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return errors.Wrap(err, "couldn't get units")
 	}
 
-	log.Debugf("systemd getAllUnits took %f", time.Since(begin).Seconds())
-
+	c.logger.Debugf("systemd getAllUnits took %f", time.Since(begin).Seconds())
 	begin = time.Now()
 	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
-	log.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
+	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
 
 	summary := summarizeUnits(units)
 	c.collectSummaryMetrics(ch, summary)
 
 	for _, unit := range units {
+		logger := c.logger.With("unit", unit.Name)
+
 		switch {
 		case strings.HasSuffix(unit.Name, ".service"):
 			err = c.collectServiceState(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			err = c.collectServiceStartTimeMetrics(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			err = c.collectServiceRestartCount(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			err = c.collectServiceTasksMetrics(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			err = c.collectServiceProcessMetrics(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
-
 		case strings.HasSuffix(unit.Name, ".mount"):
 			err = c.collectMountState(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 		case strings.HasSuffix(unit.Name, ".trigger"):
 			err := c.collectTimerTriggerTime(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".socket"):
 			err := c.collectSocketConnMetrics(conn, ch, unit)
 			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (c *Collector) collectMountState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
@@ -314,9 +315,9 @@ func (c *Collector) collectServiceRestartCount(conn *dbus.Conn, ch chan<- promet
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "NRestarts")
 	}
-	val, ok := restartsCount.Value.Value().(uint64)
+	val, ok := restartsCount.Value.Value().(uint32)
 	if !ok {
-		return errors.Errorf(errConvertUint64PropertyMsg, "NRestarts", restartsCount.Value.Value())
+		return errors.Errorf(errConvertUint32PropertyMsg, "NRestarts", restartsCount.Value.Value())
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.nRestartsDesc, prometheus.CounterValue,
@@ -387,13 +388,6 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 	ch <- prometheus.MustNewConstMetric(c.rss, prometheus.GaugeValue,
 		float64(stat.ResidentMemory()), unit.Name)
 
-	fds, err := p.FileDescriptorsLen()
-	if err != nil {
-		return errors.Wrap(err, "couldn't get process file descriptor size")
-	}
-	ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
-		float64(fds), unit.Name)
-
 	limits, err := p.NewLimits()
 	if err != nil {
 		return errors.Wrap(err, "couldn't get process limits")
@@ -402,6 +396,13 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 		float64(limits.OpenFiles), unit.Name)
 	ch <- prometheus.MustNewConstMetric(c.maxVsize, prometheus.GaugeValue,
 		float64(limits.AddressSpace), unit.Name)
+
+	fds, err := p.FileDescriptorsLen()
+	if err != nil {
+		return errors.Wrap(err, "couldn't get process file descriptor size")
+	}
+	ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
+		float64(fds), unit.Name)
 
 	return nil
 }

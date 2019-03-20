@@ -73,13 +73,16 @@ func main() {
 
 	http.Handle(*metricsPath, handler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
+		_, err := w.Write([]byte(`<html>
 			<head><title>Systemd Exporter</title></head>
 			<body>
 			<h1>Systemd Exporter</h1>
 			<p><a href="` + *metricsPath + `">Metrics</a></p>
 			</body>
 			</html>`))
+		if err != nil {
+			log.Errorf("couldn't write response: %s", err)
+		}
 	})
 
 	log.Infoln("Listening on", *listenAddress)

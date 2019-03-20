@@ -1,1 +1,2 @@
 /systemd_exporter
+/bin/golangci-lint

@@ -23,10 +23,7 @@ var (
 	systemdPrivate = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
 )
 
-var (
-	invalidMetricChars = regexp.MustCompile("[^a-z0-9:_]")
-	unitStatesName     = []string{"active", "activating", "deactivating", "inactive", "failed"}
-)
+var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
 
 var (
 	errGetPropertyMsg           = "couldn't get unit's %s property"
@@ -210,6 +207,9 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
 	log.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
 
+	summary := summarizeUnits(units)
+	c.collectSummaryMetrics(ch, summary)
+
 	for _, unit := range units {
 		switch {
 		case strings.HasSuffix(unit.Name, ".service"):
@@ -218,16 +218,22 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 				log.Warnf(errUnitMetricsMsg, unit.Name, err)
 			}
 
-			err = c.collectServiceProcessMetrics(conn, ch, unit)
-			if err != nil {
-				log.Warnf(errUnitMetricsMsg, unit.Name, err)
-			}
 			err = c.collectServiceStartTimeMetrics(conn, ch, unit)
 			if err != nil {
 				log.Warnf(errUnitMetricsMsg, unit.Name, err)
 			}
 
+			err = c.collectServiceRestartCount(conn, ch, unit)
+			if err != nil {
+				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+			}
+
 			err = c.collectServiceTasksMetrics(conn, ch, unit)
+			if err != nil {
+				log.Warnf(errUnitMetricsMsg, unit.Name, err)
+			}
+
+			err = c.collectServiceProcessMetrics(conn, ch, unit)
 			if err != nil {
 				log.Warnf(errUnitMetricsMsg, unit.Name, err)
 			}
@@ -302,7 +308,7 @@ func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Me
 	return nil
 }
 
-func (c *Collector) collectRestartCount(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectServiceRestartCount(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	// NRestarts wasn't added until systemd 235.
 	restartsCount, err := conn.GetUnitTypeProperty(unit.Name, "Service", "NRestarts")
 	if err != nil {
@@ -482,24 +488,24 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 	return nil
 }
 
+func summarizeUnits(units []dbus.UnitStatus) map[string]float64 {
+	summarized := make(map[string]float64)
+
+	for _, unitStateName := range unitStatesName {
+		summarized[unitStateName] = 0.0
+	}
+
+	for _, unit := range units {
+		summarized[unit.ActiveState] += 1.0
+	}
+
+	return summarized
+}
 func (c *Collector) collectSummaryMetrics(ch chan<- prometheus.Metric, summary map[string]float64) {
 	for stateName, count := range summary {
 		ch <- prometheus.MustNewConstMetric(
 			c.summaryDesc, prometheus.GaugeValue, count, stateName)
 	}
-}
-
-func (c *Collector) collectSystemState(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
-	systemState, err := conn.GetManagerProperty("SystemState")
-	if err != nil {
-		return fmt.Errorf("couldn't get system state: %s", err)
-	}
-	isSystemRunning := 0.0
-	if systemState == `"running"` {
-		isSystemRunning = 1.0
-	}
-	ch <- prometheus.MustNewConstMetric(c.systemRunningDesc, prometheus.GaugeValue, isSystemRunning)
-	return nil
 }
 
 func (c *Collector) newDbus() (*dbus.Conn, error) {
@@ -524,12 +530,4 @@ func filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *re
 	}
 
 	return filtered
-}
-
-func cleanMetricName(name string) string {
-	noSuffix := strings.TrimSuffix(name, ".service")
-	lower := strings.ToLower(noSuffix)
-	replaced := invalidMetricChars.ReplaceAllLiteralString(lower, "_")
-	cleaned := strings.Trim(replaced, "_")
-	return cleaned
 }

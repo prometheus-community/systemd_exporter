@@ -21,6 +21,7 @@ var (
 	unitWhitelist  = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
 	unitBlacklist  = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(automount|device|mount|scope|slice)").String()
 	systemdPrivate = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	procPath       = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -370,7 +371,11 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 		return nil
 	}
 
-	p, err := procfs.NewProc(int(pid))
+	fs, err := procfs.NewFS(*procPath)
+	if err != nil {
+		return err
+	}
+	p, err := fs.NewProc(int(pid))
 	if err != nil {
 		return err
 	}

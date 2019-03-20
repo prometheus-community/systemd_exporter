@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: systemd-exporter
+  labels:
+    name: systemd-exporter
+spec:
+  selector:
+    matchLabels:
+      k8s-app: systemd-exporter
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 100%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        k8s-app: systemd-exporter
+      annotations:
+         prometheus.io/scrape: "true"
+         prometheus.io/path: "/metrics"
+         prometheus.io/port: "9558"
+    spec:
+      securityContext:
+        runAsUser: 0
+      hostPID: true
+      containers:
+      - name: systemd-exporter
+        image: quay.io/povilasv/systemd_exporter:v0.0.3
+        securityContext:
+          privileged: true
+        args:
+          - --log.level=info
+          - --path.procfs=/host/proc
+          - --collector.unit-whitelist=kubelet.service|docker.service
+        ports:
+          - name: metrics
+            containerPort: 9558
+            hostPort: 9558
+        volumeMounts:
+          - name: proc
+            mountPath: /host/proc
+            readOnly:  true
+          - name: systemd
+            mountPath: /run/systemd
+            readOnly: true
+        resources:
+          limits:
+            memory: 100Mi
+          requests:
+            cpu: 10m
+            memory: 100Mi
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: systemd
+          hostPath:
+            path: /run/systemd

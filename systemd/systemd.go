@@ -41,8 +41,6 @@ type Collector struct {
 	unitStartTimeDesc             *prometheus.Desc
 	unitTasksCurrentDesc          *prometheus.Desc
 	unitTasksMaxDesc              *prometheus.Desc
-	systemRunningDesc             *prometheus.Desc
-	summaryDesc                   *prometheus.Desc
 	nRestartsDesc                 *prometheus.Desc
 	timerLastTriggerDesc          *prometheus.Desc
 	socketAcceptedConnectionsDesc *prometheus.Desc
@@ -77,14 +75,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
 		"Maximum number of tasks per Systemd unit", []string{"name"}, nil,
 	)
-	systemRunningDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "system_running"),
-		"Whether the system is operational (see 'systemctl is-system-running')",
-		nil, nil,
-	)
-	summaryDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "units"),
-		"Summary of systemd unit states", []string{"state"}, nil)
 	nRestartsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_restart_total"),
 		"Service unit count of Restart triggers", []string{"state"}, nil)
@@ -144,8 +134,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		unitStartTimeDesc:             unitStartTimeDesc,
 		unitTasksCurrentDesc:          unitTasksCurrentDesc,
 		unitTasksMaxDesc:              unitTasksMaxDesc,
-		systemRunningDesc:             systemRunningDesc,
-		summaryDesc:                   summaryDesc,
 		nRestartsDesc:                 nRestartsDesc,
 		timerLastTriggerDesc:          timerLastTriggerDesc,
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
@@ -176,8 +164,6 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.unitStartTimeDesc
 	desc <- c.unitTasksCurrentDesc
 	desc <- c.unitTasksMaxDesc
-	desc <- c.systemRunningDesc
-	desc <- c.summaryDesc
 	desc <- c.nRestartsDesc
 	desc <- c.timerLastTriggerDesc
 	desc <- c.socketAcceptedConnectionsDesc
@@ -208,9 +194,6 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin = time.Now()
 	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
 	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
-
-	summary := summarizeUnits(units)
-	c.collectSummaryMetrics(ch, summary)
 
 	for _, unit := range units {
 		logger := c.logger.With("unit", unit.Name)
@@ -494,26 +477,6 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 		c.timerLastTriggerDesc, prometheus.GaugeValue,
 		float64(val)/1e6, unit.Name)
 	return nil
-}
-
-func summarizeUnits(units []dbus.UnitStatus) map[string]float64 {
-	summarized := make(map[string]float64)
-
-	for _, unitStateName := range unitStatesName {
-		summarized[unitStateName] = 0.0
-	}
-
-	for _, unit := range units {
-		summarized[unit.ActiveState] += 1.0
-	}
-
-	return summarized
-}
-func (c *Collector) collectSummaryMetrics(ch chan<- prometheus.Metric, summary map[string]float64) {
-	for stateName, count := range summary {
-		ch <- prometheus.MustNewConstMetric(
-			c.summaryDesc, prometheus.GaugeValue, count, stateName)
-	}
 }
 
 func (c *Collector) newDbus() (*dbus.Conn, error) {

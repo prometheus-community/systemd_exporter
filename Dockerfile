@@ -15,6 +15,6 @@ FROM quay.io/prometheus/busybox:glibc
 COPY --from=build systemd_exporter /bin/systemd_exporter
 RUN chown -R nobody /bin/systemd_exporter
 
-EXPOSE      9557
+EXPOSE      9558
 USER        nobody
 ENTRYPOINT  ["/bin/systemd_exporter"]

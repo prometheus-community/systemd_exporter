@@ -18,10 +18,11 @@ import (
 const namespace = "systemd"
 
 var (
-	unitWhitelist  = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
-	unitBlacklist  = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(automount|device|mount|scope|slice)").String()
-	systemdPrivate = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
-	procPath       = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
+	unitWhitelist         = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
+	unitBlacklist         = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(automount|device|mount|scope|slice)").String()
+	systemdPrivate        = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	procPath              = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
+	enableRestartsMetrics = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature onlyworks with systemd 235 and above.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -226,9 +227,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
-			err = c.collectServiceRestartCount(conn, ch, unit)
-			if err != nil {
-				logger.Warnf(errUnitMetricsMsg, err)
+			if *enableRestartsMetrics {
+				err = c.collectServiceRestartCount(conn, ch, unit)
+				if err != nil {
+					logger.Warnf(errUnitMetricsMsg, err)
+				}
 			}
 
 			err = c.collectServiceTasksMetrics(conn, ch, unit)
@@ -311,7 +314,6 @@ func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Me
 }
 
 func (c *Collector) collectServiceRestartCount(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	// NRestarts wasn't added until systemd 235.
 	restartsCount, err := conn.GetUnitTypeProperty(unit.Name, "Service", "NRestarts")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "NRestarts")

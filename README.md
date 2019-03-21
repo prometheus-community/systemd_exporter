@@ -48,7 +48,7 @@ systemd_unit_tasks_current | Gauge | UNSTABLE
 systemd_unit_tasks_max | Gauge | UNSTABLE
 systemd_unit_start_time_seconds | Gauge |  UNSTABLE
 systemd_service_restart_total | Gauge |  UNSTABLE
-systemd_socket_accepted_connections_total | Counter | UNSTBLE
+systemd_socket_accepted_connections_total | Counter | UNSTABLE
 systemd_timer_last_trigger_seconds | Gauge | UNSTABLE
 systemd_socket_current_connections | Gauge | UNSTABLE
 systemd_socket_refused_connections_total | Gauge | UNSTABLE

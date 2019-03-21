@@ -14,8 +14,15 @@ For example, you can't retrieve systemd service process metrics like CPU usage o
 I've even created a Pull request for it in Node Exporter repository, but got rejected as it has no place in Node Exporter.
 So this project was born :)
 
+Some metrics are duplicated in both exporters, so make sure to tone with Node Exporter's flags.
 
-Some metrics are duplicated in both exporters, so make sure to disable Node Exporter's flags.
+In Node Exporter don't use these flags:
+
+```
+--collector.systemd.enable-task-metrics
+--collector.systemd.enable-restarts-metrics
+--collector.systemd.enable-start-time-metrics
+```
 
 # Systemd versions
 

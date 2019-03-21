@@ -22,7 +22,8 @@ var (
 	unitBlacklist         = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(automount|device|mount|scope|slice)").String()
 	systemdPrivate        = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
 	procPath              = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
-	enableRestartsMetrics = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature onlyworks with systemd 235 and above.").Bool()
+	enableRestartsMetrics = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
+	enableFDMetrics       = kingpin.Flag("collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -387,12 +388,14 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 	ch <- prometheus.MustNewConstMetric(c.maxVsize, prometheus.GaugeValue,
 		float64(limits.AddressSpace), unit.Name)
 
-	fds, err := p.FileDescriptorsLen()
-	if err != nil {
-		return errors.Wrap(err, "couldn't get process file descriptor size")
+	if *enableFDMetrics {
+		fds, err := p.FileDescriptorsLen()
+		if err != nil {
+			return errors.Wrap(err, "couldn't get process file descriptor size")
+		}
+		ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
+			float64(fds), unit.Name)
 	}
-	ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
-		float64(fds), unit.Name)
 
 	return nil
 }

@@ -3,7 +3,7 @@
 ![build](https://travis-ci.com/povilasv/systemd_exporter.svg?branch=master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/povilasv/systemd_exporter)](https://goreportcard.com/report/github.com/povilasv/systemd_exporter)
 [![Docker Repository on Quay](https://quay.io/repository/povilasv/systemd_exporter/status "Docker Repository on Quay")](https://quay.io/repository/povilasv/systemd_exporter)
-[![Docker Pulls](https://img.shields.io/docker/pulls/povilasv/systemd_exporter.svg?maxAge=604800)][hub]
+[![Docker Pulls](https://img.shields.io/docker/pulls/povilasv/systemd_exporter.svg?maxAge=604800)](https://hub.docker.com/r/povilasv/systemd_exporter)
 
 Prometheus exporter for systemd services, written in Go.
 
@@ -27,7 +27,7 @@ Optional Flags:
 Name     | Description | 
 ---------|-------------|
 --collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
---collector.enable-file-descriptor-size | Systemd Exporter needs access to /proc/X/fd files.
+--collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
 
 # Deployment
 

@@ -46,7 +46,7 @@ User need to access systemd dbus, `/proc` for exporter to work.
 
 # Metrics
 
-All metrics have `name` label, which contains systemd unit name. For example `name="bluetooh.service"` or `name="systemd-coredump.socket"`.
+All metrics have `name` label, which contains systemd unit name. For example `name="bluetooth.service"` or `name="systemd-coredump.socket"`.
 
 Metric name| Metric type | Status |
 ---------- | ----------- | ----------- |

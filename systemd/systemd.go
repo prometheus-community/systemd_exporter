@@ -38,7 +38,7 @@ var (
 
 type Collector struct {
 	logger                        log.Logger
-	unitDesc                      *prometheus.Desc
+	unitState                     *prometheus.Desc
 	unitStartTimeDesc             *prometheus.Desc
 	unitTasksCurrentDesc          *prometheus.Desc
 	unitTasksMaxDesc              *prometheus.Desc
@@ -60,7 +60,7 @@ type Collector struct {
 
 // NewCollector returns a new Collector exposing systemd statistics.
 func NewCollector(logger log.Logger) (*Collector, error) {
-	unitDesc := prometheus.NewDesc(
+	unitState := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_state"),
 		"Systemd unit", []string{"name", "state", "type"}, nil,
 	)
@@ -131,7 +131,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 
 	return &Collector{
 		logger:                        logger,
-		unitDesc:                      unitDesc,
+		unitState:                     unitState,
 		unitStartTimeDesc:             unitStartTimeDesc,
 		unitTasksCurrentDesc:          unitTasksCurrentDesc,
 		unitTasksMaxDesc:              unitTasksMaxDesc,
@@ -161,7 +161,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 // Describe gathers descriptions of Metrics
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
-	desc <- c.unitDesc
+	desc <- c.unitState
 	desc <- c.unitStartTimeDesc
 	desc <- c.unitTasksCurrentDesc
 	desc <- c.unitTasksMaxDesc
@@ -267,7 +267,7 @@ func (c *Collector) collectMountState(conn *dbus.Conn, ch chan<- prometheus.Metr
 			isActive = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(
-			c.unitDesc, prometheus.GaugeValue, isActive,
+			c.unitState, prometheus.GaugeValue, isActive,
 			unit.Name, stateName, serviceType)
 	}
 
@@ -290,7 +290,7 @@ func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Me
 			isActive = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(
-			c.unitDesc, prometheus.GaugeValue, isActive,
+			c.unitState, prometheus.GaugeValue, isActive,
 			unit.Name, stateName, serviceType)
 	}
 

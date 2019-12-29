@@ -34,11 +34,13 @@ var (
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
 	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
+	infoUnitNoHandler           = "no unit type handler for %s"
 )
 
 type systemdCollector struct {
 	logger                        log.Logger
 	unitState                     *prometheus.Desc
+	unitInfo                      *prometheus.Desc
 	unitStartTimeDesc             *prometheus.Desc
 	unitTasksCurrentDesc          *prometheus.Desc
 	unitTasksMaxDesc              *prometheus.Desc
@@ -62,7 +64,23 @@ type systemdCollector struct {
 func NewCollector(logger log.Logger) (*systemdCollector, error) {
 	unitState := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_state"),
-		"Systemd unit", []string{"name", "state", "type"}, nil,
+		"Systemd unit", []string{"name", "state"}, nil,
+	)
+	// TODO think about if we want to have 1) one unit_info metric which has all possible labels 
+	// for all possible unit type variables (at least, the relatively static ones that we care 
+	// about such as type, generated-vs-real-unit, etc). Cons: a) huge waste since all these labels 
+	// have to be set to foo="" on non-relevant types. b) accidental overloading (e.g. we have type 
+	// label, but it means something differnet for a service vs a mount. Right now it's impossible to 
+	// detangle that. 
+	// Option 1) is we have service_info, mount_info, target_info, etc. Many more metrics, but far fewer
+	// wasted labels and little chance of semantic confusion. Our current codebase is not tuned for this, 
+	// we would be adding likt 30% more lines of just boilerplate to declare these different metrics
+	// w.r.t. cardinality and performance, option 2 is slightly better performance due to smaller scrape payloads 
+	// but otherwise (1) and (2) seem similar
+	unitInfo := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_info"),
+		"Mostly-static metadata for all unit types", 
+		[]string{"name", "mount_type", "service_type"}, nil,
 	)
 	unitStartTimeDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_start_time_seconds"),
@@ -132,6 +150,7 @@ func NewCollector(logger log.Logger) (*systemdCollector, error) {
 	return &systemdCollector{
 		logger:                        logger,
 		unitState:                     unitState,
+		unitInfo:                      unitInfo,
 		unitStartTimeDesc:             unitStartTimeDesc,
 		unitTasksCurrentDesc:          unitTasksCurrentDesc,
 		unitTasksMaxDesc:              unitTasksMaxDesc,
@@ -162,6 +181,7 @@ func (c *systemdCollector) Collect(ch chan<- prometheus.Metric) {
 // Describe gathers descriptions of Metrics
 func (c *systemdCollector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.unitState
+	desc <- c.unitInfo
 	desc <- c.unitStartTimeDesc
 	desc <- c.unitTasksCurrentDesc
 	desc <- c.unitTasksMaxDesc
@@ -207,7 +227,7 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 
 		switch {
 		case strings.HasSuffix(unit.Name, ".service"):
-			err = c.collectServiceState(conn, ch, unit)
+			err = c.collectServiceMetainfo(conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
@@ -234,7 +254,7 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".mount"):
-			err = c.collectMountState(conn, ch, unit)
+			err = c.collectMountMetainfo(conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
@@ -274,9 +294,8 @@ func (c *systemdCollector) collectUnitState(conn *dbus.Conn, ch chan<- prometheu
 	return nil
 }
 
-func (c *Collector) collectMountState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *systemdCollector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	//TODO: wrap GetUnitTypePropertyString(
-	/*
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Mount", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
@@ -287,22 +306,14 @@ func (c *Collector) collectMountState(conn *dbus.Conn, ch chan<- prometheus.Metr
 		return errors.Errorf(errConvertStringPropertyMsg, "Type", serviceTypeProperty.Value.Value())
 	}
 
-	for _, stateName := range unitStatesName {
-		isActive := 0.0
-		if stateName == unit.ActiveState {
-			isActive = 1.0
-		}
-		ch <- prometheus.MustNewConstMetric(
-			c.unitState, prometheus.GaugeValue, isActive,
-			unit.Name, stateName, serviceType)
-	}
-	*/
+	ch <- prometheus.MustNewConstMetric(
+		c.unitInfo, prometheus.GaugeValue, 1.0,
+		unit.Name, serviceType, "")
 
 	return nil
 }
 
-func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	/*
+func (c *systemdCollector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Service", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
@@ -312,16 +323,9 @@ func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Me
 		return errors.Errorf(errConvertStringPropertyMsg, "Type", serviceTypeProperty.Value.Value())
 	}
 
-	for _, stateName := range unitStatesName {
-		isActive := 0.0
-		if stateName == unit.ActiveState {
-			isActive = 1.0
-		}
-		ch <- prometheus.MustNewConstMetric(
-			c.unitState, prometheus.GaugeValue, isActive,
-			unit.Name, stateName, serviceType)
-	}
-	*/
+	ch <- prometheus.MustNewConstMetric(
+		c.unitInfo, prometheus.GaugeValue, 1.0,
+		unit.Name, "", serviceType)
 	return nil
 }
 

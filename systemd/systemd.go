@@ -199,6 +199,12 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	for _, unit := range units {
 		logger := c.logger.With("unit", unit.Name)
 
+		// Collect basic state info for all units
+		err := c.collectUnitState(conn, ch, unit)
+		if err != nil {
+			logger.Warnf(errUnitMetricsMsg, err)
+		}
+
 		switch {
 		case strings.HasSuffix(unit.Name, ".service"):
 			err = c.collectServiceState(conn, ch, unit)
@@ -243,7 +249,26 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
+		default:
+			c.logger.Debugf(infoUnitNoHandler, unit.Name)
 		}
+	}
+
+	return nil
+}
+
+func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	//TODO: wrap GetUnitTypePropertyString(
+	// serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Timer", "NextElapseUSecMonotonic")
+
+	for _, stateName := range unitStatesName {
+		isActive := 0.0
+		if stateName == unit.ActiveState {
+			isActive = 1.0
+		}
+		ch <- prometheus.MustNewConstMetric(
+			c.unitState, prometheus.GaugeValue, isActive,
+			unit.Name, stateName)
 	}
 
 	return nil
@@ -251,6 +276,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 func (c *Collector) collectMountState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	//TODO: wrap GetUnitTypePropertyString(
+	/*
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Mount", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
@@ -270,11 +296,13 @@ func (c *Collector) collectMountState(conn *dbus.Conn, ch chan<- prometheus.Metr
 			c.unitState, prometheus.GaugeValue, isActive,
 			unit.Name, stateName, serviceType)
 	}
+	*/
 
 	return nil
 }
 
 func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	/*
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Service", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
@@ -293,7 +321,7 @@ func (c *Collector) collectServiceState(conn *dbus.Conn, ch chan<- prometheus.Me
 			c.unitState, prometheus.GaugeValue, isActive,
 			unit.Name, stateName, serviceType)
 	}
-
+	*/
 	return nil
 }
 

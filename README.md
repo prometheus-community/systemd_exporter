@@ -46,23 +46,28 @@ User need to access systemd dbus, `/proc` for exporter to work.
 
 # Metrics
 
-All metrics have `name` label, which contains systemd unit name. For example `name="bluetooh.service"` or `name="systemd-coredump.socket"`.
+All metrics have `name` label, which contains systemd unit name. For example `name="bluetooth.service"` or `name="systemd-coredump.socket"`.
 
-Metric name| Metric type | Status |
----------- | ----------- | ----------- |
-systemd_unit_state | Gauge |  UNSTABLE
-systemd_unit_tasks_current | Gauge | UNSTABLE
-systemd_unit_tasks_max | Gauge | UNSTABLE
-systemd_unit_start_time_seconds | Gauge |  UNSTABLE
-systemd_service_restart_total | Gauge |  UNSTABLE
-systemd_socket_accepted_connections_total | Counter | UNSTABLE
-systemd_timer_last_trigger_seconds | Gauge | UNSTABLE
-systemd_socket_current_connections | Gauge | UNSTABLE
-systemd_socket_refused_connections_total | Gauge | UNSTABLE
-systemd_process_resident_memory_bytes| Gauge | UNSTABLE
-systemd_process_virtual_memory_bytes | Gauge | UNSTABLE
-systemd_process_virtual_memory_max_bytes | Gauge |  UNSTABLE
-systemd_process_open_fds | Gauge | UNSTABLE
-systemd_process_max_fds | Gauge | UNSTABLE
-systemd_process_cpu_seconds_total | Counter | UNSTABLE
+Note that a number of unit types are filtered by default
+
+Metric name                               | Metric type | Status      | Cardinality |
+----------------------------------------- | ----------- | ----------- | ----------- |
+systemd_exporter_build_info               | Gauge       |  UNSTABLE   | 1 per systemd-exporter 
+systemd_unit_info                         | Gauge       |  UNSTABLE   | 1 per service + 1 per mount 
+systemd_unit_cpu_seconds_total            | Gauge       |  UNSTABLE   | 2 per unit {mode="system|user"}         
+systemd_unit_state                        | Gauge       |  UNSTABLE   | 5 per unit {state="activating|active|deactivating|failed|inactive}            
+systemd_unit_tasks_current                | Gauge       |  UNSTABLE
+systemd_unit_tasks_max                    | Gauge       |  UNSTABLE
+systemd_unit_start_time_seconds           | Gauge       |  UNSTABLE
+systemd_service_restart_total             | Gauge       |  UNSTABLE
+systemd_socket_accepted_connections_total | Counter     |  UNSTABLE   | 1 per socket
+systemd_socket_current_connections        | Gauge       |  UNSTABLE   | 1 per socket
+systemd_socket_refused_connections_total  | Gauge       |  UNSTABLE
+systemd_timer_last_trigger_seconds        | Gauge       |  UNSTABLE
+systemd_process_resident_memory_bytes     | Gauge       |  UNSTABLE   | 1 per service
+systemd_process_virtual_memory_bytes      | Gauge       |  UNSTABLE   | 1 per service
+systemd_process_virtual_memory_max_bytes  | Gauge       |  UNSTABLE   | 1 per service
+systemd_process_open_fds                  | Gauge       |  UNSTABLE   | 1 per service
+systemd_process_max_fds                   | Gauge       |  UNSTABLE   | 1 per service
+systemd_process_cpu_seconds_total         | Counter     |  UNSTABLE   | 1 per service
 

@@ -1,9 +1,15 @@
 package systemd
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"math"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +40,7 @@ var (
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
 	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
+	errControlGroupReadMsg      = "Failed to read %s from control group"
 	infoUnitNoHandler           = "no unit type handler for %s"
 )
 
@@ -50,6 +57,7 @@ type systemdCollector struct {
 	socketCurrentConnectionsDesc  *prometheus.Desc
 	socketRefusedConnectionsDesc  *prometheus.Desc
 	cpuTotalDesc                  *prometheus.Desc
+	unitCPUTotal                  *prometheus.Desc
 	openFDs                       *prometheus.Desc
 	maxFDs                        *prometheus.Desc
 	vsize                         *prometheus.Desc
@@ -115,6 +123,14 @@ func NewCollector(logger log.Logger) (*systemdCollector, error) {
 		"Total user and system CPU time spent in seconds.",
 		[]string{"name"}, nil,
 	)
+	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
+	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metics
+	// e.g. (2 modes * 4 cores) per enabled unit
+	unitCPUTotal := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
+		"Unit CPU time in seconds",
+		[]string{"name", "mode"}, nil,
+	)
 
 	openFDs := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "process_open_fds"),
@@ -160,6 +176,7 @@ func NewCollector(logger log.Logger) (*systemdCollector, error) {
 		socketCurrentConnectionsDesc:  socketCurrentConnectionsDesc,
 		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
 		cpuTotalDesc:                  cpuTotalDesc,
+		unitCPUTotal:                  unitCPUTotal,
 		openFDs:                       openFDs,
 		maxFDs:                        maxFDs,
 		vsize:                         vsize,
@@ -253,12 +270,19 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
+			err = c.collectUnitCpuUsageMetrics("Service", conn, ch, unit)
+			if err != nil {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
 		case strings.HasSuffix(unit.Name, ".mount"):
 			err = c.collectMountMetainfo(conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
-
+			err = c.collectUnitCpuUsageMetrics("Service", conn, ch, unit)
+			if err != nil {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
 		case strings.HasSuffix(unit.Name, ".trigger"):
 			err := c.collectTimerTriggerTime(conn, ch, unit)
 			if err != nil {
@@ -266,6 +290,20 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 			}
 		case strings.HasSuffix(unit.Name, ".socket"):
 			err := c.collectSocketConnMetrics(conn, ch, unit)
+			if err != nil {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
+			err = c.collectUnitCpuUsageMetrics("Socket", conn, ch, unit)
+			if err != nil {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
+		case strings.HasSuffix(unit.Name, ".swap"):
+			err = c.collectUnitCpuUsageMetrics("Swap", conn, ch, unit)
+			if err != nil {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
+		case strings.HasSuffix(unit.Name, ".slice"):
+			err = c.collectUnitCpuUsageMetrics("Slice", conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
@@ -370,6 +408,112 @@ func (c *systemdCollector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch ch
 	return nil
 }
 
+type CPUUsageOne struct {
+	cpu_id             uint32
+	usage_sys_nanosec  uint64
+	usage_user_nanosec uint64
+}
+
+// Holds contents of /sys/fs/cgroup/..../cpuacct.usage_all
+type CPUAcct struct {
+	cpu []CPUUsageOne
+}
+
+func (c *CPUAcct) usage_user_nanosec() uint64 {
+	var all uint64
+	for _, cpu := range c.cpu {
+		all += cpu.usage_user_nanosec
+	}
+	return all
+}
+
+func (c *CPUAcct) usage_sys_nanosec() uint64 {
+	var all uint64
+	for _, cpu := range c.cpu {
+		all += cpu.usage_sys_nanosec
+	}
+	return all
+}
+
+func (c *CPUAcct) usage_all_nanosec() uint64 {
+	var all uint64
+	for _, cpu := range c.cpu {
+		all += cpu.usage_sys_nanosec + cpu.usage_user_nanosec
+	}
+	return all
+}
+
+// COPIED FROM prometheus/procfs WHICH ALSO USES APACHE 2.0
+// ReadFileNoStat uses ioutil.ReadAll to read contents of entire file.
+// This is similar to ioutil.ReadFile but without the call to os.Stat, because
+// many files in /proc and /sys report incorrect file sizes (either 0 or 4096).
+// Reads a max file size of 512kB.  For files larger than this, a scanner
+// should be used.
+func ReadFileNoStat(filename string) ([]byte, error) {
+	const maxBufferSize = 1024 * 512
+
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	reader := io.LimitReader(f, maxBufferSize)
+	return ioutil.ReadAll(reader)
+}
+
+func cg_NewCPUAcct(cg_sub_path string) (*CPUAcct, error) {
+
+	var cpuUsage CPUAcct
+	var cpuTest CPUUsageOne
+
+	var cg_path = "/sys/fs/cgroup/cpu" + cg_sub_path + "/cpuacct.usage_all"
+	log.Debugf("CPU hierarchy path %s", cg_path)
+
+	cpuTest.cpu_id = 0
+
+	// Example cpuacct.usage_all
+	// cpu user system
+	// 0 21165924 0
+	// 1 13334251 0
+	b, err := ReadFileNoStat(cg_path)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to read file %s", cg_path)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	scanner.Scan()
+	for scanner.Scan() {
+		text := scanner.Text()
+		vals := strings.Split(text, " ")
+		if len(vals) != 3 {
+			return nil, errors.Wrapf(err, "Unable to parse contents of file %s", cg_path)
+		}
+		cpu, err := strconv.ParseUint(vals[0], 10, 32)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Unable to parse %s as uint32 (from %s)", vals[0], cg_path)
+		}
+		user, err := strconv.ParseUint(vals[1], 10, 64)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Unable to parse %s as uint64 (from %s)", vals[1], cg_path)
+		}
+		sys, err := strconv.ParseUint(vals[2], 10, 64)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Unable to parse %s as an in (from %s)", vals[2], cg_path)
+		}
+		var onecpu CPUUsageOne
+		onecpu.cpu_id = uint32(cpu)
+		onecpu.usage_user_nanosec = user
+		onecpu.usage_sys_nanosec = sys
+		cpuUsage.cpu = append(cpuUsage.cpu, onecpu)
+	}
+	if len(cpuUsage.cpu) < 1 {
+		return nil, errors.Wrapf(err, "Found no CPUs information inside %s", cg_path)
+	}
+
+	return &cpuUsage, nil
+}
+
 func (c *systemdCollector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	// TODO: ExecStart type property, has a slice with process information.
 	// When systemd manages multiple processes, maybe we should add them all?
@@ -428,6 +572,48 @@ func (c *systemdCollector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan
 		ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
 			float64(fds), unit.Name)
 	}
+
+	return nil
+}
+
+// A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
+// resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
+func (c *systemdCollector) collectUnitCpuUsageMetrics(unitType string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	prop_cg_subpath, err := conn.GetUnitTypeProperty(unit.Name, unitType, "ControlGroup")
+	if err != nil {
+		return errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
+	}
+	cg_subpath, ok := prop_cg_subpath.Value.Value().(string)
+	if !ok {
+		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", prop_cg_subpath.Value.Value())
+	}
+
+	prop_cpuAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "CPUAccounting")
+	if err != nil {
+		return errors.Wrapf(err, errGetPropertyMsg, "CPUAccounting")
+	}
+	cpuAcct, ok := prop_cpuAcct.Value.Value().(bool)
+	if !ok {
+		return errors.Errorf(errConvertStringPropertyMsg, "CPUAccounting", prop_cpuAcct.Value.Value())
+	}
+	if cpuAcct == false {
+		return nil
+	}
+
+	cpu_usage, err := cg_NewCPUAcct(cg_subpath)
+	if err != nil {
+		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
+	}
+
+	user_total_seconds := float64(cpu_usage.usage_user_nanosec()) / 1000000000.0
+	sys_total_seconds := float64(cpu_usage.usage_sys_nanosec()) / 1000000000.0
+
+	ch <- prometheus.MustNewConstMetric(
+		c.unitCPUTotal, prometheus.CounterValue,
+		user_total_seconds, unit.Name, "user")
+	ch <- prometheus.MustNewConstMetric(
+		c.unitCPUTotal, prometheus.CounterValue,
+		sys_total_seconds, unit.Name, "system")
 
 	return nil
 }

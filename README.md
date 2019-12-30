@@ -20,7 +20,7 @@ advantage of systemd's builtin process and thread grouping to provide applicatio
 | process-exporter | Focus is on individual processes                | CPU of specific process ID (e.g. `1127`)
 
 Systemd groups processes, threads, and other resources (PIDs, memory, etc) into logical containers 
-called units. Systemd-exporter will read the 12 different types of systemd units (e.g. service, slice, etc)
+called units. Systemd-exporter will read the 11 different types of systemd units (e.g. service, slice, etc)
 and give you metrics about the health and resource consumption of each unit. This allows an application
 specific view of your system, allowing you to determine resource usage of an application such as 
 `mysql.service` independently from the resources used by other processes on your system.
@@ -61,7 +61,7 @@ Take a look at `examples` for daemonset manifests for Kubernetes.
 
 # User privilleges
 
-User need to access systemd dbus, `/proc` for exporter to work.
+User need to access systemd dbus, `/proc`, `/sys/fs/cgroup` for exporter to work.
 
 # Metrics
 
@@ -73,7 +73,7 @@ Metric name                               | Metric type | Status      | Cardinal
 ----------------------------------------- | ----------- | ----------- | ----------- |
 systemd_exporter_build_info               | Gauge       |  UNSTABLE   | 1 per systemd-exporter 
 systemd_unit_info                         | Gauge       |  UNSTABLE   | 1 per service + 1 per mount 
-systemd_unit_cpu_seconds_total            | Gauge       |  UNSTABLE   | 2 per unit {mode="system|user"}         
+systemd_unit_cpu_seconds_total            | Gauge       |  UNSTABLE   | 2 per mount|scope|slice|socket|swap {mode="system|user"}         
 systemd_unit_state                        | Gauge       |  UNSTABLE   | 5 per unit {state="activating|active|deactivating|failed|inactive}            
 systemd_unit_tasks_current                | Gauge       |  UNSTABLE
 systemd_unit_tasks_max                    | Gauge       |  UNSTABLE

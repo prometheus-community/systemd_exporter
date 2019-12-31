@@ -13,47 +13,54 @@ import (
 	"github.com/prometheus/common/log"
 )
 
-type CPUUsageOne struct {
-	cpu_id             uint32
-	usage_sys_nanosec  uint64
-	usage_user_nanosec uint64
+// CPUUsage stores one core's worth of CPU usage for a control group
+// (aka cgroup) of tasks (e.g. both processes and threads).
+// Equivalent to cpuacct.usage_percpu_user and cpuacct.usage_percpu_system
+type CPUUsage struct {
+	CPUId         uint32
+	SystemNanosec uint64
+	UserNanosec   uint64
 }
 
-// Holds contents of /sys/fs/cgroup/..../cpuacct.usage_all
+// CPUAcct stores CPU accounting information (e.g. cpu usage) for a control
+// group (cgroup) of tasks. Equivalent to cpuacct.usage_all
 type CPUAcct struct {
-	cpu []CPUUsageOne
+	CPUs []CPUUsage
 }
 
-func (c *CPUAcct) usage_user_nanosec() uint64 {
-	var all uint64
-	for _, cpu := range c.cpu {
-		all += cpu.usage_user_nanosec
+// UsageUser returns user (e.g. non-kernel) cpu consumption in nanoseconds, across all available cpu
+// cores, from the point that CPU accounting was enabled for this control group.
+func (c *CPUAcct) UsageUser() (nanoseconds uint64) {
+	for _, cpu := range c.CPUs {
+		nanoseconds += cpu.UserNanosec
 	}
-	return all
+	return
 }
 
-func (c *CPUAcct) usage_sys_nanosec() uint64 {
-	var all uint64
-	for _, cpu := range c.cpu {
-		all += cpu.usage_sys_nanosec
+// UsageSystem returns system (e.g. kernel) cpu consumption in nanoseconds, across all available cpu
+// cores, from the point that CPU accounting was enabled for this control group.
+func (c *CPUAcct) UsageSystem() (nanoseconds uint64) {
+	for _, cpu := range c.CPUs {
+		nanoseconds += cpu.SystemNanosec
 	}
-	return all
+	return
 }
 
-func (c *CPUAcct) usage_all_nanosec() uint64 {
-	var all uint64
-	for _, cpu := range c.cpu {
-		all += cpu.usage_sys_nanosec + cpu.usage_user_nanosec
+// UsageAll returns total cpu consumption in nanoseconds, across all available cpu
+// cores, from the point that CPU accounting was enabled for this control group.
+func (c *CPUAcct) UsageAll() (nanoseconds uint64) {
+	for _, cpu := range c.CPUs {
+		nanoseconds += cpu.SystemNanosec + cpu.UserNanosec
 	}
-	return all
+	return
 }
 
-// COPIED FROM prometheus/procfs WHICH ALSO USES APACHE 2.0
 // ReadFileNoStat uses ioutil.ReadAll to read contents of entire file.
 // This is similar to ioutil.ReadFile but without the call to os.Stat, because
 // many files in /proc and /sys report incorrect file sizes (either 0 or 4096).
 // Reads a max file size of 512kB.  For files larger than this, a scanner
 // should be used.
+// COPIED FROM prometheus/procfs WHICH ALSO USES APACHE 2.0
 func ReadFileNoStat(filename string) ([]byte, error) {
 	const maxBufferSize = 1024 * 512
 
@@ -67,23 +74,22 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 	return ioutil.ReadAll(reader)
 }
 
-func cg_NewCPUAcct(cg_sub_path string) (*CPUAcct, error) {
+// NewCPUAcct will locate and read the kernel's cpu accounting info for
+// the provided systemd cgroup subpath.
+func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 
 	var cpuUsage CPUAcct
-	var cpuTest CPUUsageOne
 
-	var cg_path = "/sys/fs/cgroup/cpu" + cg_sub_path + "/cpuacct.usage_all"
-	log.Debugf("CPU hierarchy path %s", cg_path)
-
-	cpuTest.cpu_id = 0
+	var CGPath = "/sys/fs/cgroup/cpu" + CGSubpath + "/cpuacct.usage_all"
+	log.Debugf("CPU hierarchy path %s", CGPath)
 
 	// Example cpuacct.usage_all
 	// cpu user system
 	// 0 21165924 0
 	// 1 13334251 0
-	b, err := ReadFileNoStat(cg_path)
+	b, err := ReadFileNoStat(CGPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Unable to read file %s", cg_path)
+		return nil, errors.Wrapf(err, "Unable to read file %s", CGPath)
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
@@ -92,28 +98,28 @@ func cg_NewCPUAcct(cg_sub_path string) (*CPUAcct, error) {
 		text := scanner.Text()
 		vals := strings.Split(text, " ")
 		if len(vals) != 3 {
-			return nil, errors.Wrapf(err, "Unable to parse contents of file %s", cg_path)
+			return nil, errors.Wrapf(err, "Unable to parse contents of file %s", CGPath)
 		}
 		cpu, err := strconv.ParseUint(vals[0], 10, 32)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to parse %s as uint32 (from %s)", vals[0], cg_path)
+			return nil, errors.Wrapf(err, "Unable to parse %s as uint32 (from %s)", vals[0], CGPath)
 		}
 		user, err := strconv.ParseUint(vals[1], 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to parse %s as uint64 (from %s)", vals[1], cg_path)
+			return nil, errors.Wrapf(err, "Unable to parse %s as uint64 (from %s)", vals[1], CGPath)
 		}
 		sys, err := strconv.ParseUint(vals[2], 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to parse %s as an in (from %s)", vals[2], cg_path)
+			return nil, errors.Wrapf(err, "Unable to parse %s as an in (from %s)", vals[2], CGPath)
 		}
-		var onecpu CPUUsageOne
-		onecpu.cpu_id = uint32(cpu)
-		onecpu.usage_user_nanosec = user
-		onecpu.usage_sys_nanosec = sys
-		cpuUsage.cpu = append(cpuUsage.cpu, onecpu)
+		var onecpu CPUUsage
+		onecpu.CPUId = uint32(cpu)
+		onecpu.UserNanosec = user
+		onecpu.SystemNanosec = sys
+		cpuUsage.CPUs = append(cpuUsage.CPUs, onecpu)
 	}
-	if len(cpuUsage.cpu) < 1 {
-		return nil, errors.Wrapf(err, "Found no CPUs information inside %s", cg_path)
+	if len(cpuUsage.CPUs) < 1 {
+		return nil, errors.Wrapf(err, "Found no CPUs information inside %s", CGPath)
 	}
 
 	return &cpuUsage, nil

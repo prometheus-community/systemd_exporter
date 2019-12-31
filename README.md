@@ -65,7 +65,11 @@ User need to access systemd dbus, `/proc`, `/sys/fs/cgroup` for exporter to work
 
 # Metrics
 
-All metrics have `name` label, which contains systemd unit name. For example `name="bluetooth.service"` or `name="systemd-coredump.socket"`.
+All metrics have `name` label, which contains systemd unit name. For example 
+`name="bluetooth.service"` or `name="systemd-coredump.socket"`. Metrics that 
+are present for all units (e.g. those named `unit_*`) additionally have a 
+label type e.g. (`type="socket"` or `type="service"`) to allow usage in 
+PromQL grouping queries (e.g. `count(systemd_unit_state) by (type)`)
 
 Note that a number of unit types are filtered by default
 

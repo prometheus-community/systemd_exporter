@@ -64,9 +64,11 @@ type systemdCollector struct {
 
 // NewCollector returns a new systemdCollector exposing systemd statistics.
 func NewCollector(logger log.Logger) (*systemdCollector, error) {
+	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
+	// with users before we started exporting type label
 	unitState := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_state"),
-		"Systemd unit", []string{"name", "state"}, nil,
+		"Systemd unit", []string{"name", "type", "state"}, nil,
 	)
 	// TODO think about if we want to have 1) one unit_info metric which has all possible labels 
 	// for all possible unit type variables (at least, the relatively static ones that we care 
@@ -81,20 +83,23 @@ func NewCollector(logger log.Logger) (*systemdCollector, error) {
 	// but otherwise (1) and (2) seem similar
 	unitInfo := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_info"),
-		"Mostly-static metadata for all unit types", 
-		[]string{"name", "mount_type", "service_type"}, nil,
+		"Mostly-static metadata for all unit types",
+		[]string{"name", "type", "mount_type", "service_type"}, nil,
 	)
 	unitStartTimeDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_start_time_seconds"),
-		"Start time of the unit since unix epoch in seconds.", []string{"name"}, nil,
+		"Start time of the unit since unix epoch in seconds.",
+		[]string{"name", "type"}, nil,
 	)
 	unitTasksCurrentDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_current"),
-		"Current number of tasks per Systemd unit", []string{"name"}, nil,
+		"Current number of tasks per Systemd unit",
+		[]string{"name"}, nil,
 	)
 	unitTasksMaxDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
-		"Maximum number of tasks per Systemd unit", []string{"name"}, nil,
+		"Maximum number of tasks per Systemd unit",
+		[]string{"name", "type"}, nil,
 	)
 	nRestartsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_restart_total"),
@@ -123,7 +128,7 @@ func NewCollector(logger log.Logger) (*systemdCollector, error) {
 	unitCPUTotal := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
 		"Unit CPU time in seconds",
-		[]string{"name", "mode"}, nil,
+		[]string{"name", "type", "mode"}, nil,
 	)
 
 	openFDs := prometheus.NewDesc(
@@ -209,6 +214,11 @@ func (c *systemdCollector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.rss
 }
 
+func ParseUnitType(unit dbus.UnitStatus) string {
+	t := strings.Split(unit.Name, ".")
+	return t[len(t)-1]
+}
+
 func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
@@ -219,7 +229,7 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 
 	allUnits, err := conn.ListUnits()
 	if err != nil {
-		return errors.Wrap(err, "couldn't get units")
+		return errors.Wrap(err, "Could not get list of systemd units from dbus")
 	}
 
 	c.logger.Debugf("systemd getAllUnits took %f", time.Since(begin).Seconds())
@@ -230,7 +240,7 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 	for _, unit := range units {
 		logger := c.logger.With("unit", unit.Name)
 
-		// Collect basic state info for all units
+		// Collect unit_state for all
 		err := c.collectUnitState(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
@@ -287,6 +297,8 @@ func (c *systemdCollector) collect(ch chan<- prometheus.Metric) error {
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
+			// Most sockets do not have a cpu cgroupfs entry, but a
+			// few do, notably docker.socket
 			err = c.collectUnitCpuUsageMetrics("Socket", conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
@@ -320,12 +332,13 @@ func (c *systemdCollector) collectUnitState(conn *dbus.Conn, ch chan<- prometheu
 		}
 		ch <- prometheus.MustNewConstMetric(
 			c.unitState, prometheus.GaugeValue, isActive,
-			unit.Name, stateName)
+			unit.Name, ParseUnitType(unit), stateName)
 	}
 
 	return nil
 }
 
+// TODO metric is named unit but function is "Mount"
 func (c *systemdCollector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	//TODO: wrap GetUnitTypePropertyString(
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Mount", "Type")
@@ -340,11 +353,12 @@ func (c *systemdCollector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prome
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitInfo, prometheus.GaugeValue, 1.0,
-		unit.Name, serviceType, "")
+		unit.Name, ParseUnitType(unit), serviceType, "")
 
 	return nil
 }
 
+// TODO the metric is named unit_info but function is named "Service"
 func (c *systemdCollector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Service", "Type")
 	if err != nil {
@@ -357,7 +371,7 @@ func (c *systemdCollector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- pro
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitInfo, prometheus.GaugeValue, 1.0,
-		unit.Name, "", serviceType)
+		unit.Name, ParseUnitType(unit), "", serviceType)
 	return nil
 }
 
@@ -376,6 +390,7 @@ func (c *systemdCollector) collectServiceRestartCount(conn *dbus.Conn, ch chan<-
 	return nil
 }
 
+// TODO metric is named unit but function is "Service"
 func (c *systemdCollector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	var startTimeUsec uint64
 
@@ -397,7 +412,7 @@ func (c *systemdCollector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch ch
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitStartTimeDesc, prometheus.GaugeValue,
-		float64(startTimeUsec)/1e6, unit.Name)
+		float64(startTimeUsec)/1e6, unit.Name, ParseUnitType(unit))
 
 	return nil
 }
@@ -498,10 +513,10 @@ func (c *systemdCollector) collectUnitCpuUsageMetrics(unitType string, conn *dbu
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitCPUTotal, prometheus.CounterValue,
-		user_total_seconds, unit.Name, "user")
+		user_total_seconds, unit.Name, ParseUnitType(unit), "user")
 	ch <- prometheus.MustNewConstMetric(
 		c.unitCPUTotal, prometheus.CounterValue,
-		sys_total_seconds, unit.Name, "system")
+		sys_total_seconds, unit.Name, ParseUnitType(unit), "system")
 
 	return nil
 }
@@ -536,6 +551,8 @@ func (c *systemdCollector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- p
 	return nil
 }
 
+// TODO either the unit should be called service_tasks, or it should work for all
+// units. It's currently named unit_task
 func (c *systemdCollector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	tasksCurrentCount, err := conn.GetUnitTypeProperty(unit.Name, "Service", "TasksCurrent")
 	if err != nil {
@@ -567,7 +584,7 @@ func (c *systemdCollector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<-
 	if maxCount != math.MaxUint64 {
 		ch <- prometheus.MustNewConstMetric(
 			c.unitTasksMaxDesc, prometheus.GaugeValue,
-			float64(maxCount), unit.Name)
+			float64(maxCount), unit.Name, ParseUnitType(unit))
 	}
 
 	return nil

@@ -239,6 +239,7 @@ func (c *SystemdCollector) collect(ch chan<- prometheus.Metric) error {
 
 	for _, unit := range units {
 		logger := c.logger.With("unit", unit.Name)
+		c.logger = c.logger.With("unit", unit.Name)
 
 		// Collect unit_state for all
 		err := c.collectUnitState(conn, ch, unit)
@@ -479,6 +480,22 @@ func (c *SystemdCollector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan
 	return nil
 }
 
+func (c *SystemdCollector) mustGetUnitStringTypeProperty(unitType string,
+	propName string, defaultVal string, conn *dbus.Conn, unit dbus.UnitStatus) string {
+
+	prop, err := conn.GetUnitTypeProperty(unit.Name, unitType, propName)
+	if err != nil {
+		c.logger.Debugf(errGetPropertyMsg, propName)
+		return defaultVal
+	}
+	propVal, ok := prop.Value.Value().(string)
+	if !ok {
+		c.logger.Debugf(errConvertStringPropertyMsg, propName, prop.Value.Value())
+		return defaultVal
+	}
+	return propVal
+}
+
 // A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
 // resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
 func (c *SystemdCollector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
@@ -489,6 +506,18 @@ func (c *SystemdCollector) collectUnitCPUUsageMetrics(unitType string, conn *dbu
 	CGSubpath, ok := propCGSubpath.Value.Value().(string)
 	if !ok {
 		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
+	}
+
+	if CGSubpath == "" && unit.ActiveState == "inactive" {
+		// This is an expected condition in most cases, systemd has cleaned up
+		// and all accounting info for this unit is gone. We have nothing to record
+		return nil
+	} else if CGSubpath == "" && unit.ActiveState != "inactive" {
+		// Unexpected. Why is there no cgroup on an active unit?
+		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
+		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
+		return errors.Errorf("Got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)",
+			unit.ActiveState, subType, slice)
 	}
 
 	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "CPUAccounting")

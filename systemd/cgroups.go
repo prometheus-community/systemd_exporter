@@ -28,31 +28,34 @@ type CPUAcct struct {
 	CPUs []CPUUsage
 }
 
-// UsageUser returns user (e.g. non-kernel) cpu consumption in nanoseconds, across all available cpu
+// UsageUserNanosecs returns user (e.g. non-kernel) cpu consumption in nanoseconds, across all available cpu
 // cores, from the point that CPU accounting was enabled for this control group.
-func (c *CPUAcct) UsageUser() (nanoseconds uint64) {
+func (c *CPUAcct) UsageUserNanosecs() uint64 {
+	var nanoseconds uint64
 	for _, cpu := range c.CPUs {
 		nanoseconds += cpu.UserNanosec
 	}
-	return
+	return nanoseconds
 }
 
-// UsageSystem returns system (e.g. kernel) cpu consumption in nanoseconds, across all available cpu
+// UsageSystemNanosecs returns system (e.g. kernel) cpu consumption in nanoseconds, across all available cpu
 // cores, from the point that CPU accounting was enabled for this control group.
-func (c *CPUAcct) UsageSystem() (nanoseconds uint64) {
+func (c *CPUAcct) UsageSystemNanosecs() uint64 {
+	var nanoseconds uint64
 	for _, cpu := range c.CPUs {
 		nanoseconds += cpu.SystemNanosec
 	}
-	return
+	return nanoseconds
 }
 
-// UsageAll returns total cpu consumption in nanoseconds, across all available cpu
+// UsageAllNanosecs returns total cpu consumption in nanoseconds, across all available cpu
 // cores, from the point that CPU accounting was enabled for this control group.
-func (c *CPUAcct) UsageAll() (nanoseconds uint64) {
+func (c *CPUAcct) UsageAllNanosecs() uint64 {
+	var nanoseconds uint64
 	for _, cpu := range c.CPUs {
 		nanoseconds += cpu.SystemNanosec + cpu.UserNanosec
 	}
-	return
+	return nanoseconds
 }
 
 // ReadFileNoStat uses ioutil.ReadAll to read contents of entire file.

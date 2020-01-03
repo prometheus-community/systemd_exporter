@@ -536,8 +536,8 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
 	}
 
-	userSeconds := float64(cpuUsage.UsageUser()) / 1000000000.0
-	sysSeconds := float64(cpuUsage.UsageSystem()) / 1000000000.0
+	userSeconds := float64(cpuUsage.UsageUserNanosecs()) / 1000000000.0
+	sysSeconds := float64(cpuUsage.UsageSystemNanosecs()) / 1000000000.0
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitCPUTotal, prometheus.CounterValue,

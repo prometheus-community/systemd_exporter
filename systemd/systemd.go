@@ -288,7 +288,7 @@ func (c *SystemdCollector) collect(ch chan<- prometheus.Metric) error {
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
-		case strings.HasSuffix(unit.Name, ".trigger"):
+		case strings.HasSuffix(unit.Name, ".timer"):
 			err := c.collectTimerTriggerTime(conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)

@@ -55,6 +55,8 @@ Name     | Description |
 --collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
 --collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
 
+Of note, there is no customized support for `.snapshot` (removed in systemd v228), `.busname` (only present on systems using kdbus), `generated` (created via generators), `transient` (created during systemd-run) have no special support. 
+
 # Deployment
 
 Take a look at `examples` for daemonset manifests for Kubernetes.

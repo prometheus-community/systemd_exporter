@@ -47,7 +47,7 @@ func main() {
 	r.MustRegister(version.NewCollector("systemd_exporter"))
 	r.MustRegister(prommod.NewCollector("systemd_exporter"))
 
-	collector, err := systemd.NewSystemdCollector(log.Base())
+	collector, err := systemd.NewCollector(log.Base())
 	if err != nil {
 		log.Fatalf("couldn't create collector: %s", err)
 	}

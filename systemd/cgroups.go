@@ -97,7 +97,13 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 	scanner.Scan()
+	if scanner.Err() != nil {
+		return nil, errors.Wrapf(err, "Unable to scan file %s", CGPath)
+	}
 	for scanner.Scan() {
+		if scanner.Err() != nil {
+			return nil, errors.Wrapf(err, "Unable to scan file %s", CGPath)
+		}
 		text := scanner.Text()
 		vals := strings.Split(text, " ")
 		if len(vals) != 3 {
@@ -115,10 +121,11 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "Unable to parse %s as an in (from %s)", vals[2], CGPath)
 		}
-		var onecpu CPUUsage
-		onecpu.CPUId = uint32(cpu)
-		onecpu.UserNanosec = user
-		onecpu.SystemNanosec = sys
+		onecpu := CPUUsage{
+			CPUId:         uint32(cpu),
+			UserNanosec:   user,
+			SystemNanosec: sys,
+		}
 		cpuUsage.CPUs = append(cpuUsage.CPUs, onecpu)
 	}
 	if len(cpuUsage.CPUs) < 1 {

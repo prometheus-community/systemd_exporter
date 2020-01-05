@@ -97,11 +97,11 @@ func cgUnifiedCached() (*CgroupUnified, error) {
 				log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
 				cgroupUnified = &none
 			default:
-				return nil, errors.Wrapf(err, "Unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
+				return nil, errors.Errorf("Unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
 			}
 		}
 	default:
-		return nil, errors.Wrapf(err, "Unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup)", fs.Type)
+		return nil, errors.Errorf("Unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup)", fs.Type)
 	}
 
 	return cgroupUnified, nil
@@ -220,17 +220,17 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 	scanner.Scan()
-	if scanner.Err() != nil {
+	if err := scanner.Err(); err != nil {
 		return nil, errors.Wrapf(err, "Unable to scan file %s", CGPath)
 	}
 	for scanner.Scan() {
-		if scanner.Err() != nil {
+		if err := scanner.Err(); err != nil {
 			return nil, errors.Wrapf(err, "Unable to scan file %s", CGPath)
 		}
 		text := scanner.Text()
 		vals := strings.Split(text, " ")
 		if len(vals) != 3 {
-			return nil, errors.Wrapf(err, "Unable to parse contents of file %s", CGPath)
+			return nil, errors.Errorf("Unable to parse contents of file %s", CGPath)
 		}
 		cpu, err := strconv.ParseUint(vals[0], 10, 32)
 		if err != nil {
@@ -252,7 +252,7 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 		cpuUsage.CPUs = append(cpuUsage.CPUs, onecpu)
 	}
 	if len(cpuUsage.CPUs) < 1 {
-		return nil, errors.Wrapf(err, "Found no CPUs information inside %s", CGPath)
+		return nil, errors.Errorf("Found no CPUs information inside %s", CGPath)
 	}
 
 	return &cpuUsage, nil

@@ -12,12 +12,12 @@ Prometheus exporter for systemd units, written in Go.
 The focus on each exporter is different. node-exporter has a broad focus, and process-exporter
 is focused on deep analysis of specific processes. systemd-exporter aims to fit in the middle, taking 
 advantage of systemd's builtin process and thread grouping to provide application-level metrics. 
- 
-| Exporter         | Metric Goals                                    | Example                     
-| ---------------- | ----------------------------------------------- | --------------------------- 
-| node-exporter    | Machine-wide monitoring and usage summary       | CPU usage of entire node (e.g. `127.0.0.1`)
-| systemd-exporter | Systemd unit monitoring and resource usage      | CPU usage of each service (e.g. `mongodb.service`)       
-| process-exporter | Focus is on individual processes                | CPU of specific process ID (e.g. `1127`)
+
+| Exporter         | Metric Goals                               | Example                                            |
+| ---------------- | ------------------------------------------ | -------------------------------------------------- |
+| node-exporter    | Machine-wide monitoring and usage summary  | CPU usage of entire node (e.g. `127.0.0.1`)        |
+| systemd-exporter | Systemd unit monitoring and resource usage | CPU usage of each service (e.g. `mongodb.service`) |
+| process-exporter | Focus is on individual processes           | CPU of specific process ID (e.g. `1127`)           |
 
 Systemd groups processes, threads, and other resources (PIDs, memory, etc) into logical containers 
 called units. Systemd-exporter will read the 11 different types of systemd units (e.g. service, slice, etc)
@@ -75,24 +75,23 @@ PromQL grouping queries (e.g. `count(systemd_unit_state) by (type)`)
 
 Note that a number of unit types are filtered by default
 
-Metric name                               | Metric type | Status      | Cardinality |
------------------------------------------ | ----------- | ----------- | ----------- |
-systemd_exporter_build_info               | Gauge       |  UNSTABLE   | 1 per systemd-exporter 
-systemd_unit_info                         | Gauge       |  UNSTABLE   | 1 per service + 1 per mount 
-systemd_unit_cpu_seconds_total            | Gauge       |  UNSTABLE   | 2 per mount|scope|slice|socket|swap {mode="system|user"}         
-systemd_unit_state                        | Gauge       |  UNSTABLE   | 5 per unit {state="activating|active|deactivating|failed|inactive}            
-systemd_unit_tasks_current                | Gauge       |  UNSTABLE
-systemd_unit_tasks_max                    | Gauge       |  UNSTABLE
-systemd_unit_start_time_seconds           | Gauge       |  UNSTABLE
-systemd_service_restart_total             | Gauge       |  UNSTABLE
-systemd_socket_accepted_connections_total | Counter     |  UNSTABLE   | 1 per socket
-systemd_socket_current_connections        | Gauge       |  UNSTABLE   | 1 per socket
-systemd_socket_refused_connections_total  | Gauge       |  UNSTABLE
-systemd_timer_last_trigger_seconds        | Gauge       |  UNSTABLE
-systemd_process_resident_memory_bytes     | Gauge       |  UNSTABLE   | 1 per service
-systemd_process_virtual_memory_bytes      | Gauge       |  UNSTABLE   | 1 per service
-systemd_process_virtual_memory_max_bytes  | Gauge       |  UNSTABLE   | 1 per service
-systemd_process_open_fds                  | Gauge       |  UNSTABLE   | 1 per service
-systemd_process_max_fds                   | Gauge       |  UNSTABLE   | 1 per service
-systemd_process_cpu_seconds_total         | Counter     |  UNSTABLE   | 1 per service
-
+| Metric name                               | Metric type | Status   | Cardinality                                                        |
+| ----------------------------------------- | ----------- | -------- | ------------------------------------------------------------------ |
+| systemd_exporter_build_info               | Gauge       | UNSTABLE | 1 per systemd-exporter                                             |
+| systemd_unit_info                         | Gauge       | UNSTABLE | 1 per service + 1 per mount                                        |
+| systemd_unit_cpu_seconds_total            | Gauge       | UNSTABLE | 2 per mount/scope/slice/socket/swap {mode="system/user"}           |
+| systemd_unit_state                        | Gauge       | UNSTABLE | 5 per unit {state="activating/active/deactivating/failed/inactive} |
+| systemd_unit_tasks_current                | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_unit_tasks_max                    | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_unit_start_time_seconds           | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_service_restart_total             | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_socket_accepted_connections_total | Counter     | UNSTABLE | 1 per socket                                                       |
+| systemd_socket_current_connections        | Gauge       | UNSTABLE | 1 per socket                                                       |
+| systemd_socket_refused_connections_total  | Gauge       | UNSTABLE | 1 per socket                                                       |
+| systemd_timer_last_trigger_seconds        | Gauge       | UNSTABLE | 1 per timer                                                        |
+| systemd_process_resident_memory_bytes     | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_process_virtual_memory_bytes      | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_process_virtual_memory_max_bytes  | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_process_open_fds                  | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_process_max_fds                   | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_process_cpu_seconds_total         | Counter     | UNSTABLE | 1 per service                                                      |

@@ -8,11 +8,13 @@
 
 ### Changes
 
-* [ENHANCEMENT] Read unit CPU usage from cgroup, add `systemd_unit_cpu_seconds_total` metric
-* [ENHANCEMENT] Add `type` label to all metrics named `systemd_unit-*` 
+- [FEATURE] Read unit CPU usage from cgroup. Added `systemd_unit_cpu_seconds_total` metric. **Note** - Untested on unified hierarchy
+- [FEATURE] Add `systemd_unit_info` with metainformation about units incl. subtype specific info
+- [ENHANCEMENT] Added `type` label to all metrics named `systemd_unit-*` to support PromQL grouping
 * [ENHANCEMENT] `systemd_unit_state` works for all unit types, just service and mount units
-* [FEATURE] Add `systemd_unit_info` with metainformation about units incl. subtype specific info
+* [CHANGE] Start tracking metric cardinality in readme
 * [CHANGE] Expanded default set of unit types monitored. Only device unit types are not enabled by default
+* [BUGFIX] `timer_last_trigger_seconds` metric is now exported as expected for all timers
 
 ## 0.2.0 / 2019-03-20
 

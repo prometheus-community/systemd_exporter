@@ -238,80 +238,81 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
 
 	for _, unit := range units {
+		logger := c.logger.With("unit", unit.Name)
 		c.logger = c.logger.With("unit", unit.Name)
 
 		// Collect unit_state for all
 		err := c.collectUnitState(conn, ch, unit)
 		if err != nil {
-			c.logger.Warnf(errUnitMetricsMsg, err)
+			logger.Warnf(errUnitMetricsMsg, err)
 		}
 
 		switch {
 		case strings.HasSuffix(unit.Name, ".service"):
 			err = c.collectServiceMetainfo(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			err = c.collectServiceStartTimeMetrics(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			if *enableRestartsMetrics {
 				err = c.collectServiceRestartCount(conn, ch, unit)
 				if err != nil {
-					c.logger.Warnf(errUnitMetricsMsg, err)
+					logger.Warnf(errUnitMetricsMsg, err)
 				}
 			}
 
 			err = c.collectServiceTasksMetrics(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 
 			err = c.collectServiceProcessMetrics(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 			err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".mount"):
 			err = c.collectMountMetainfo(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 			err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".timer"):
 			err := c.collectTimerTriggerTime(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".socket"):
 			err := c.collectSocketConnMetrics(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 			// Most sockets do not have a cpu cgroupfs entry, but a
 			// few do, notably docker.socket
 			err = c.collectUnitCPUUsageMetrics("Socket", conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".swap"):
 			err = c.collectUnitCPUUsageMetrics("Swap", conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		case strings.HasSuffix(unit.Name, ".slice"):
 			err = c.collectUnitCPUUsageMetrics("Slice", conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		default:
 			c.logger.Debugf(infoUnitNoHandler, unit.Name)

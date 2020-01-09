@@ -34,7 +34,7 @@ var (
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
 	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
-	errControlGroupReadMsg      = "Failed to read %s from control group"
+	errControlGroupReadMsg      = "failed to read %s from control group"
 	infoUnitNoHandler           = "no unit type handler for %s"
 )
 
@@ -70,16 +70,16 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "unit_state"),
 		"Systemd unit", []string{"name", "type", "state"}, nil,
 	)
-	// TODO think about if we want to have 1) one unit_info metric which has all possible labels 
-	// for all possible unit type variables (at least, the relatively static ones that we care 
-	// about such as type, generated-vs-real-unit, etc). Cons: a) huge waste since all these labels 
-	// have to be set to foo="" on non-relevant types. b) accidental overloading (e.g. we have type 
-	// label, but it means something differnet for a service vs a mount. Right now it's impossible to 
-	// detangle that. 
+	// TODO think about if we want to have 1) one unit_info metric which has all possible labels
+	// for all possible unit type variables (at least, the relatively static ones that we care
+	// about such as type, generated-vs-real-unit, etc). Cons: a) huge waste since all these labels
+	// have to be set to foo="" on non-relevant types. b) accidental overloading (e.g. we have type
+	// label, but it means something differnet for a service vs a mount. Right now it's impossible to
+	// detangle that.
 	// Option 1) is we have service_info, mount_info, target_info, etc. Many more metrics, but far fewer
-	// wasted labels and little chance of semantic confusion. Our current codebase is not tuned for this, 
+	// wasted labels and little chance of semantic confusion. Our current codebase is not tuned for this,
 	// we would be adding likt 30% more lines of just boilerplate to declare these different metrics
-	// w.r.t. cardinality and performance, option 2 is slightly better performance due to smaller scrape payloads 
+	// w.r.t. cardinality and performance, option 2 is slightly better performance due to smaller scrape payloads
 	// but otherwise (1) and (2) seem similar
 	unitInfo := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_info"),
@@ -229,7 +229,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	allUnits, err := conn.ListUnits()
 	if err != nil {
-		return errors.Wrap(err, "Could not get list of systemd units from dbus")
+		return errors.Wrap(err, "could not get list of systemd units from dbus")
 	}
 
 	c.logger.Debugf("systemd getAllUnits took %f", time.Since(begin).Seconds())
@@ -515,7 +515,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		// Unexpected. Why is there no cgroup on an active unit?
 		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
 		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		return errors.Errorf("Got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)",
+		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)",
 			unit.ActiveState, subType, slice)
 	}
 

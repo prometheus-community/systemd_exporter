@@ -69,7 +69,7 @@ func cgUnifiedCached() (*CgroupUnified, error) {
 	var fs unix.Statfs_t
 	err := unix.Statfs("/sys/fs/cgroup/", &fs)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Failed statfs(/sys/fs/cgroup)")
+		return nil, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup)")
 	}
 
 	none, systemd, all := CgroupUnifiedNone, CgroupUnifiedSystemd, CgroupUnifiedAll
@@ -87,7 +87,7 @@ func cgUnifiedCached() (*CgroupUnified, error) {
 		} else {
 			err := unix.Statfs("/sys/fs/cgroup/systemd", &fs)
 			if err != nil {
-				return nil, errors.Wrapf(err, "Failed statfs(/sys/fs/cgroup/systemd)")
+				return nil, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup/systemd)")
 			}
 			switch fs.Type {
 			case CGROUP2_SUPER_MAGIC:
@@ -97,11 +97,11 @@ func cgUnifiedCached() (*CgroupUnified, error) {
 				log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
 				cgroupUnified = &none
 			default:
-				return nil, errors.Errorf("Unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
+				return nil, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
 			}
 		}
 	default:
-		return nil, errors.Errorf("Unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup)", fs.Type)
+		return nil, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup)", fs.Type)
 	}
 
 	return cgroupUnified, nil
@@ -116,7 +116,7 @@ func cgGetPath(controller string, subpath string, suffix string) (*string, error
 
 	unified, err := cgUnifiedCached()
 	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to determine cgroup mounting hierarchy")
+		return nil, errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
 	}
 
 	// TODO Ensure controller name is valid
@@ -200,12 +200,11 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 // NewCPUAcct will locate and read the kernel's cpu accounting info for
 // the provided systemd cgroup subpath.
 func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
-
 	var cpuUsage CPUAcct
 
 	CGPathPtr, err := cgGetPath("cpu", CGSubpath, "cpuacct.usage_all")
 	if err != nil {
-		return nil, errors.Wrapf(err, "Unable to get cpu controller path")
+		return nil, errors.Wrapf(err, "unable to get cpu controller path")
 	}
 	CGPath := *CGPathPtr
 
@@ -215,34 +214,34 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 	// 1 13334251 0
 	b, err := ReadFileNoStat(CGPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Unable to read file %s", CGPath)
+		return nil, errors.Wrapf(err, "unable to read file %s", CGPath)
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 	scanner.Scan()
 	if err := scanner.Err(); err != nil {
-		return nil, errors.Wrapf(err, "Unable to scan file %s", CGPath)
+		return nil, errors.Wrapf(err, "unable to scan file %s", CGPath)
 	}
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			return nil, errors.Wrapf(err, "Unable to scan file %s", CGPath)
+			return nil, errors.Wrapf(err, "unable to scan file %s", CGPath)
 		}
 		text := scanner.Text()
 		vals := strings.Split(text, " ")
 		if len(vals) != 3 {
-			return nil, errors.Errorf("Unable to parse contents of file %s", CGPath)
+			return nil, errors.Errorf("unable to parse contents of file %s", CGPath)
 		}
 		cpu, err := strconv.ParseUint(vals[0], 10, 32)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to parse %s as uint32 (from %s)", vals[0], CGPath)
+			return nil, errors.Wrapf(err, "unable to parse %s as uint32 (from %s)", vals[0], CGPath)
 		}
 		user, err := strconv.ParseUint(vals[1], 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to parse %s as uint64 (from %s)", vals[1], CGPath)
+			return nil, errors.Wrapf(err, "unable to parse %s as uint64 (from %s)", vals[1], CGPath)
 		}
 		sys, err := strconv.ParseUint(vals[2], 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to parse %s as an in (from %s)", vals[2], CGPath)
+			return nil, errors.Wrapf(err, "unable to parse %s as an in (from %s)", vals[2], CGPath)
 		}
 		onecpu := CPUUsage{
 			CPUId:         uint32(cpu),
@@ -252,7 +251,7 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 		cpuUsage.CPUs = append(cpuUsage.CPUs, onecpu)
 	}
 	if len(cpuUsage.CPUs) < 1 {
-		return nil, errors.Errorf("Found no CPUs information inside %s", CGPath)
+		return nil, errors.Errorf("no CPU/core info extracted from %s", CGPath)
 	}
 
 	return &cpuUsage, nil

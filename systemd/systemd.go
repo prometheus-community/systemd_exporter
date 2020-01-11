@@ -239,7 +239,6 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	for _, unit := range units {
 		logger := c.logger.With("unit", unit.Name)
-		c.logger = c.logger.With("unit", unit.Name)
 
 		// Collect unit_state for all
 		err := c.collectUnitState(conn, ch, unit)
@@ -503,16 +502,16 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
 	}
-	CGSubpath, ok := propCGSubpath.Value.Value().(string)
+	cgSubpath, ok := propCGSubpath.Value.Value().(string)
 	if !ok {
 		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
 	}
 
-	if CGSubpath == "" && unit.ActiveState == "inactive" {
+	if cgSubpath == "" && unit.ActiveState == "inactive" {
 		// This is an expected condition in most cases, systemd has cleaned up
 		// and all accounting info for this unit is gone. We have nothing to record
 		return nil
-	} else if CGSubpath == "" && unit.ActiveState != "inactive" {
+	} else if cgSubpath == "" && unit.ActiveState != "inactive" {
 		// Unexpected. Why is there no cgroup on an active unit?
 		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
 		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
@@ -532,7 +531,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return nil
 	}
 
-	cpuUsage, err := NewCPUAcct(CGSubpath)
+	cpuUsage, err := NewCPUAcct(cgSubpath)
 	if err != nil {
 		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
 	}

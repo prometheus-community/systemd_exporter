@@ -199,49 +199,49 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 
 // NewCPUAcct will locate and read the kernel's cpu accounting info for
 // the provided systemd cgroup subpath.
-func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
+func NewCPUAcct(cgSubpath string) (*CPUAcct, error) {
 	var cpuUsage CPUAcct
 
-	CGPathPtr, err := cgGetPath("cpu", CGSubpath, "cpuacct.usage_all")
+	cgPathPtr, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all")
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to get cpu controller path")
 	}
-	CGPath := *CGPathPtr
+	cgPath := *cgPathPtr
 
 	// Example cpuacct.usage_all
 	// cpu user system
 	// 0 21165924 0
 	// 1 13334251 0
-	b, err := ReadFileNoStat(CGPath)
+	b, err := ReadFileNoStat(cgPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unable to read file %s", CGPath)
+		return nil, errors.Wrapf(err, "unable to read file %s", cgPath)
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 	scanner.Scan()
 	if err := scanner.Err(); err != nil {
-		return nil, errors.Wrapf(err, "unable to scan file %s", CGPath)
+		return nil, errors.Wrapf(err, "unable to scan file %s", cgPath)
 	}
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			return nil, errors.Wrapf(err, "unable to scan file %s", CGPath)
+			return nil, errors.Wrapf(err, "unable to scan file %s", cgPath)
 		}
 		text := scanner.Text()
 		vals := strings.Split(text, " ")
 		if len(vals) != 3 {
-			return nil, errors.Errorf("unable to parse contents of file %s", CGPath)
+			return nil, errors.Errorf("unable to parse contents of file %s", cgPath)
 		}
 		cpu, err := strconv.ParseUint(vals[0], 10, 32)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unable to parse %s as uint32 (from %s)", vals[0], CGPath)
+			return nil, errors.Wrapf(err, "unable to parse %s as uint32 (from %s)", vals[0], cgPath)
 		}
 		user, err := strconv.ParseUint(vals[1], 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unable to parse %s as uint64 (from %s)", vals[1], CGPath)
+			return nil, errors.Wrapf(err, "unable to parse %s as uint64 (from %s)", vals[1], cgPath)
 		}
 		sys, err := strconv.ParseUint(vals[2], 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unable to parse %s as an in (from %s)", vals[2], CGPath)
+			return nil, errors.Wrapf(err, "unable to parse %s as an in (from %s)", vals[2], cgPath)
 		}
 		onecpu := CPUUsage{
 			CPUId:         uint32(cpu),
@@ -251,7 +251,7 @@ func NewCPUAcct(CGSubpath string) (*CPUAcct, error) {
 		cpuUsage.CPUs = append(cpuUsage.CPUs, onecpu)
 	}
 	if len(cpuUsage.CPUs) < 1 {
-		return nil, errors.Errorf("no CPU/core info extracted from %s", CGPath)
+		return nil, errors.Errorf("no CPU/core info extracted from %s", cgPath)
 	}
 
 	return &cpuUsage, nil

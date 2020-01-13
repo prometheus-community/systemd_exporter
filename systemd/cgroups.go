@@ -112,13 +112,16 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 // cgGetPath returns the absolute path for a specific file in a specific controller
 // in the specific cgroup denoted by the passed subpath.
 // Input examples: ("cpu", "/system.slice", "cpuacct.usage_all)
-func cgGetPath(controller string, subpath string, suffix string) (*string, error) {
+func cgGetPath(controller string, subpath string, suffix string) (string, error) {
 	// relevant systemd source code in cgroup-util.[h|c] specifically cg_get_path
 	//  2. Joins controller name with base path
 
+	// Returned on error
+	errRtn := "error-in-cgGetPath"
+
 	unified, err := cgUnifiedCached()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
+		return errRtn, errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
 	}
 
 	// TODO Ensure controller name is valid
@@ -132,9 +135,9 @@ func cgGetPath(controller string, subpath string, suffix string) (*string, error
 	case unifModeAll:
 		joined = filepath.Join("/sys/fs/cgroup", subpath, suffix)
 	default:
-		return nil, errors.Errorf("unknown cgroup mount mode (e.g. unified mode) %d", unified)
+		return errRtn, errors.Errorf("unknown cgroup mount mode (e.g. unified mode) %d", unified)
 	}
-	return &joined, nil
+	return joined, nil
 }
 
 // CPUUsage stores one core's worth of CPU usage for a control group
@@ -206,11 +209,10 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 func NewCPUAcct(cgSubpath string) (*CPUAcct, error) {
 	var cpuUsage CPUAcct
 
-	cgPathPtr, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all")
+	cgPath, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all")
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to get cpu controller path")
 	}
-	cgPath := *cgPathPtr
 
 	// Example cpuacct.usage_all
 	// cpu user system

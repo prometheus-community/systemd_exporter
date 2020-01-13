@@ -51,9 +51,9 @@ var cgroupUnified cgUnifiedMountMode = unifModeUnknown
 
 // Values copied from https://github.com/torvalds/linux/blob/master/include/uapi/linux/magic.h
 const (
-	TMPFS_MAGIC         = 0x01021994
-	CGROUP_SUPER_MAGIC  = 0x27e0eb
-	CGROUP2_SUPER_MAGIC = 0x63677270
+	tmpFsMagic        = 0x01021994
+	cgroupSuperMagic  = 0x27e0eb
+	cgroup2SuperMagic = 0x63677270
 )
 
 // cgUnifiedCached checks the filesystem types mounted under /sys/fs/cgroup to determine
@@ -76,14 +76,14 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 	}
 
 	switch fs.Type {
-	case CGROUP2_SUPER_MAGIC:
+	case cgroup2SuperMagic:
 		log.Debugf("Found cgroup2 on /sys/fs/cgroup, full unified hierarchy")
 		cgroupUnified = unifModeAll
-	case TMPFS_MAGIC:
+	case tmpFsMagic:
 		err := unix.Statfs("/sys/fs/cgroup/unified", &fs)
 
 		// Ignore err, we expect path to be missing on v232
-		if err == nil && fs.Type == CGROUP2_SUPER_MAGIC {
+		if err == nil && fs.Type == cgroup2SuperMagic {
 			log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller")
 			cgroupUnified = unifModeSystemd
 		} else {
@@ -92,10 +92,10 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 				return unifModeUnknown, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup/systemd)")
 			}
 			switch fs.Type {
-			case CGROUP2_SUPER_MAGIC:
+			case cgroup2SuperMagic:
 				log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)")
 				cgroupUnified = unifModeSystemd
-			case CGROUP_SUPER_MAGIC:
+			case cgroupSuperMagic:
 				log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
 				cgroupUnified = unifModeNone
 			default:

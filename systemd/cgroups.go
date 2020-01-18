@@ -116,12 +116,9 @@ func cgGetPath(controller string, subpath string, suffix string) (string, error)
 	// relevant systemd source code in cgroup-util.[h|c] specifically cg_get_path
 	//  2. Joins controller name with base path
 
-	// Returned on error
-	errRtn := "error-in-cgGetPath"
-
 	unified, err := cgUnifiedCached()
 	if err != nil {
-		return errRtn, errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
+		return "", errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
 	}
 
 	// TODO Ensure controller name is valid
@@ -135,7 +132,7 @@ func cgGetPath(controller string, subpath string, suffix string) (string, error)
 	case unifModeAll:
 		joined = filepath.Join("/sys/fs/cgroup", subpath, suffix)
 	default:
-		return errRtn, errors.Errorf("unknown cgroup mount mode (e.g. unified mode) %d", unified)
+		return "", errors.Errorf("unknown cgroup mount mode (e.g. unified mode) %d", unified)
 	}
 	return joined, nil
 }
@@ -224,7 +221,9 @@ func NewCPUAcct(cgSubpath string) (*CPUAcct, error) {
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
-	scanner.Scan()
+	if ok := scanner.Scan(); !ok {
+		return nil, errors.Errorf("unable to scan file %s", cgPath)
+	}
 	if err := scanner.Err(); err != nil {
 		return nil, errors.Wrapf(err, "unable to scan file %s", cgPath)
 	}

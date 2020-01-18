@@ -507,16 +507,16 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
 	}
 
-	if cgSubpath == "" && unit.ActiveState == "inactive" {
+	switch {
+	case cgSubpath == "" && unit.ActiveState == "inactive":
 		// This is an expected condition in most cases, systemd has cleaned up
 		// and all accounting info for this unit is gone. We have nothing to record
 		return nil
-	} else if cgSubpath == "" && unit.ActiveState != "inactive" {
+	case cgSubpath == "" && unit.ActiveState != "inactive":
 		// Unexpected. Why is there no cgroup on an active unit?
 		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
 		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)",
-			unit.ActiveState, subType, slice)
+		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
 	}
 
 	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "CPUAccounting")
@@ -527,7 +527,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 	if !ok {
 		return errors.Errorf(errConvertStringPropertyMsg, "CPUAccounting", propCPUAcct.Value.Value())
 	}
-	if cpuAcct == false {
+	if !cpuAcct {
 		return nil
 	}
 

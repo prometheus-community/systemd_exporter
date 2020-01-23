@@ -508,15 +508,23 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 	}
 
 	switch {
-	case cgSubpath == "" && unit.ActiveState == "inactive":
-		// This is an expected condition in most cases, systemd has cleaned up
-		// and all accounting info for this unit is gone. We have nothing to record
+	case cgSubpath == "" && unit.ActiveState == "inactive",
+		cgSubpath == "" && unit.ActiveState == "failed":
+		// Expected condition, systemd has cleaned up and
+		// we have nothing to record
 		return nil
-	case cgSubpath == "" && unit.ActiveState != "inactive":
+	case cgSubpath == "" && unit.ActiveState == "active":
 		// Unexpected. Why is there no cgroup on an active unit?
 		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
 		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
 		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
+	case cgSubpath == "":
+		// We are likely reading a unit that is currently changing state, so
+		// we record this and bail
+		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
+		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
+		log.Debugf("Read 'no cgroup' from unit (name=%s state=%s subtype=%s slice=%s) ", unit.Name, unit.ActiveState, subType, slice)
+		return nil
 	}
 
 	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "CPUAccounting")

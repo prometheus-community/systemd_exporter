@@ -283,7 +283,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
-			err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
+			err = c.collectUnitCPUUsageMetrics("Mount", conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}

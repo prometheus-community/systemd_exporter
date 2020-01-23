@@ -544,9 +544,8 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		if unitType == "Socket" {
 			log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
 			return nil
-		} else {
-			return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
 		}
+		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
 	}
 
 	userSeconds := float64(cpuUsage.UsageUserNanosecs()) / 1000000000.0

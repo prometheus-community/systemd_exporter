@@ -5,6 +5,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-systemd/dbus"
@@ -235,13 +236,20 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
 	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
 
+	var wg sync.WaitGroup
+	wg.Add(len(units))
 	for _, unit := range units {
-		err := c.collectUnit(conn, ch, unit)
-		if err != nil {
-			c.logger.Warnf(errUnitMetricsMsg, err)
-		}
+		go func(unit dbus.UnitStatus) {
+			err := c.collectUnit(conn, ch, unit)
+			if err != nil {
+				c.logger.Warnf(errUnitMetricsMsg, err)
+			}
+			wg.Done()
+		}(unit)
 	}
 
+	wg.Wait()
+	return nil
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {

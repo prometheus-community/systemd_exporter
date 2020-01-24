@@ -230,7 +230,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return errors.Wrap(err, "could not get list of systemd units from dbus")
 	}
 
-	c.logger.Debugf("systemd getAllUnits took %f", time.Since(begin).Seconds())
+	c.logger.Debugf("systemd ListUnits took %f", time.Since(begin).Seconds())
 	begin = time.Now()
 	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
 	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())

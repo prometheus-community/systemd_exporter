@@ -5,7 +5,6 @@ import (
 	"math"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coreos/go-systemd/dbus"
@@ -236,19 +235,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
 	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
 
-	var wg sync.WaitGroup
-	wg.Add(len(units))
-	for _, unit := range units {
+	for unit := range units {
 		go func(unit dbus.UnitStatus) {
 			err := c.collectUnit(conn, ch, unit)
 			if err != nil {
 				c.logger.Warnf(errUnitMetricsMsg, err)
 			}
-			wg.Done()
 		}(unit)
 	}
 
-	wg.Wait()
 	return nil
 }
 
@@ -669,19 +664,19 @@ func (c *Collector) newDbus() (*dbus.Conn, error) {
 	return dbus.New()
 }
 
-func filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *regexp.Regexp) []dbus.UnitStatus {
-	filtered := make([]dbus.UnitStatus, 0, len(units))
+func filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *regexp.Regexp) chan dbus.UnitStatus {
+	ch := make(chan dbus.UnitStatus)
 	for _, unit := range units {
 		if whitelistPattern.MatchString(unit.Name) &&
 			!blacklistPattern.MatchString(unit.Name) &&
 			unit.LoadState == "loaded" {
 
 			log.Debugf("Adding unit: %s", unit.Name)
-			filtered = append(filtered, unit)
+			ch <- unit
 		} else {
 			log.Debugf("Ignoring unit: %s", unit.Name)
 		}
 	}
 
-	return filtered
+	return ch
 }

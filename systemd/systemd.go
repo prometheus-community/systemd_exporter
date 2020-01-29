@@ -3,6 +3,7 @@ package systemd
 import (
 	"fmt"
 	"math"
+	_ "net/http/pprof"
 	"regexp"
 	"strings"
 	"time"

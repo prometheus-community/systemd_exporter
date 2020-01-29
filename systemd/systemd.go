@@ -27,6 +27,8 @@ var (
 	enableFDMetrics       = kingpin.Flag("collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
 )
 
+var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
+
 var (
 	errGetPropertyMsg           = "couldn't get unit's %s property"
 	errConvertUint64PropertyMsg = "couldn't convert unit's %s property %v to uint64"
@@ -336,7 +338,6 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	//TODO: wrap GetUnitTypePropertyString(
 	// serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Timer", "NextElapseUSecMonotonic")
-	unitStatesName := []string{"active", "activating", "deactivating", "inactive", "failed"}
 
 	for _, stateName := range unitStatesName {
 		isActive := 0.0

@@ -5,33 +5,32 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
 
 var (
-	binaryName = "systemd_exporter"
-	binaryPath = filepath.Join(binaryName)
-	// os.Getenv("GOPATH"), "bin/node_exporter")
+	address     = "127.0.0.1:9550"
+	binaryName  = "systemd_exporter"
+	defaultArgs = []string{binaryName, fmt.Sprintf("--web.listen-address=%s", address)}
 )
 
-const (
-	address = "127.0.0.1:9558"
-)
+func TestMain(m *testing.M) {
+	// TODO accept arg for listen address
+}
 
 // TestNoop only exists as an example of how you can test
 func TestNoop(t *testing.T) {
 	noop := func() error { return nil }
-	runServerAndTest([]string{binaryName}, address, noop)
+	runServerAndTest(defaultArgs, address, noop)
 }
 
 // TestVersionFlag is an example of running a test that does not rely on the server being
 // online. TODO make a reusable runTest() for this use case
 func TestVersionFlag(t *testing.T) {
 	noop := func() error { return nil }
-	runServerAndTest([]string{binaryName, "--version"}, address, noop)
+	runServerAndTest(append(defaultArgs, "--version"), address, noop)
 }
 
 func TestMetricEndpointReturnsHttp200(t *testing.T) {
@@ -45,7 +44,7 @@ func TestMetricEndpointReturnsHttp200(t *testing.T) {
 		}
 		return nil
 	}
-	runServerAndTest([]string{binaryName}, address, test)
+	runServerAndTest(defaultArgs, address, test)
 }
 
 func runServerAndTest(args []string, url string, fn func() error) error {

@@ -10,5 +10,6 @@ require (
 	github.com/prometheus/client_golang v0.9.2
 	github.com/prometheus/common v0.2.0
 	github.com/prometheus/procfs v0.0.0-20190319124303-40f3c57fb198
+	golang.org/x/sys v0.0.0-20181116152217-5ac8a444bdc5
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	_ "net/http/pprof"
+	"sync"
 
 	"github.com/povilasv/prommod"
 	"github.com/povilasv/systemd_exporter/systemd"
@@ -14,6 +15,40 @@ import (
 )
 
 func main() {
+	listenAddress := mainCore()
+
+	log.Infoln("Listening on", listenAddress)
+	if err := http.ListenAndServe(listenAddress, nil); err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+func testMain(wg *sync.WaitGroup) *http.Server {
+	listenAddress := mainCore()
+
+	// Launch server in background
+	srv := &http.Server{Addr: listenAddress}
+	log.Infoln("Queuing test server startup")
+	go func() {
+		defer wg.Done()
+
+		// ErrServerClosed indicates graceful close
+		log.Infoln("Test server listening on", listenAddress)
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			// unexpected error. port in use?
+			log.Fatalf("ListenAndServe(): %v", err)
+		}
+
+		// Reset http package
+		http.DefaultServeMux = http.NewServeMux()
+		log.Infoln("Test server shutdown")
+	}()
+
+	return srv
+}
+
+func mainCore() string {
 	var (
 		listenAddress = kingpin.Flag(
 			"web.listen-address",
@@ -85,8 +120,5 @@ func main() {
 		}
 	})
 
-	log.Infoln("Listening on", *listenAddress)
-	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
-		log.Fatal(err)
-	}
+	return *listenAddress
 }

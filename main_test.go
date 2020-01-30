@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,6 +21,26 @@ var (
 const (
 	address = "localhost:9558"
 )
+
+func TestWhatTheHack(t *testing.T) {
+	serverDone := &sync.WaitGroup{}
+	serverDone.Add(1)
+	// os.Args = []string{binaryName, "--version"}
+	os.Args = []string{binaryName, "--web.listen-address=127.0.0.1:9558", "--log.level=debug"}
+	srv := testMain(serverDone)
+
+	// Running some fancy tests right here :-)
+	time.Sleep(5 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		panic(err) // failure/timeout shutting down the server gracefully
+	}
+
+	serverDone.Wait()
+}
 
 func testFlagVersion(t *testing.T) {
 	if _, err := os.Stat(binaryPath); err != nil {

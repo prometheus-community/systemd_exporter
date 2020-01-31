@@ -5,7 +5,7 @@ BRANCH := $(shell git branch | grep \* | cut -d ' ' -f2)
 
 LINT_FLAGS := run --deadline=120s
 LINTER := ./bin/golangci-lint
-TESTFLAGS := -v -cover -race -coverprofile=coverage.txt -covermode=atomic
+TESTFLAGS := -v -cover -race -coverpkg=github.com/povilasv/systemd_exporter,github.com/povilasv/systemd_exporter/systemd -coverprofile=coverage.txt -covermode=atomic
 
 GO111MODULE := on
 all: $(LINTER) deps test lint build

@@ -3,8 +3,8 @@ jobs:
   build:
     machine:
       image: ubuntu-1604:201903-01
-      # environment:
-      # BASH_ENV: /home/circleci/.bashrc
+      environment:
+        GOROOT=/usr/lib/go-1.13
     steps:
       - run: env | sort && touch $BASH_ENV 
       - checkout
@@ -15,16 +15,10 @@ jobs:
       - run: 
           name: Install latest golang
           command: sudo apt-get install -y golang-go
-      - run:
-          name: Reconfigure golang
-          command: echo "export GOROOT=/usr/lib/go-1.13" >> $BASH_ENV && echo "export PATH=$GOROOT/bin:$PATH" >> $BASH_ENV
-          # - run: echo $PATH && which go
-          # - run: export GOROOT=/usr/lib/go-1.13 && export PATH=$GOROOT/bin:$PATH && echo $PATH && which go
-      - run: go version || true
-      - run: systemd --version || true
-      - run: go env || true
-        # - run: go get || true
-        # - run: go build || true
+      - run: 
+          run: go version && go env
+          command: PATH=$GOROOT/bin:$PATH go version && go env
+      - run: systemd --version
       - run: go test -coverprofile=full_coverage.out
       - store_artifacts:
           path: full_coverage.out

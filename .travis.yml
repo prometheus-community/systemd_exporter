@@ -1,4 +1,6 @@
 
+# This defines the script for us automatically. By default it installs 
+# to requested go version then runs make
 language: go
 go:
   - "1.x"
@@ -6,6 +8,11 @@ go:
 before_script: systemd --version
 os: linux
 dist: xenial
+
+go:
+  - 1.x 
+
+before_script: systemd --version
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)

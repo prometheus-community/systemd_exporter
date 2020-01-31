@@ -1,9 +1,24 @@
- version: 2
- jobs:
-   build:
-     docker:
-       - image: circleci/golang:1.13.6-buster
-     steps:
-       - checkout
-       - run: go test
+version: 2
+jobs:
+  test:
+    docker:
+      - image: circleci/golang:1.13.6-buster
+    steps:
+      - checkout
+      - run: go test -coverprofile=coverage.out
+      - run: systemd --version || true
+      - store_artifacts:
+          path: coverage.out
+
+  test_full:
+    machine:
+      - image: ubuntu-1604:201903-01
+    steps:
+      - checkout
+      - run: go test -coverprofile=full_coverage.out
+      - run: systemd --versioni || true
+      - store_artifacts:
+          path: full_coverage.out
+
+
 

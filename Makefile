@@ -23,7 +23,8 @@ deps:
 
 .PHONY: test
 test:
-	go test $(TESTFLAGS) ./...
+	go get github.com/ory/go-acc
+	go-acc ./...
 
 .PHONY: build
 build: deps

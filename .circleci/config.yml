@@ -1,22 +1,12 @@
 version: 2
 jobs:
-  test:
-    docker:
-      - image: circleci/golang:1.13.6-buster
-    steps:
-      - checkout
-      - run: go version || true
-      - run: go env || true
-      - run: go test -coverprofile=coverage.out
-      - run: systemd --version || true
-      - store_artifacts:
-          path: coverage.out
-          destination: coverage.out
-
-  test_full:
+  build:
     machine:
       image: ubuntu-1604:201903-01
+      # environment:
+      # BASH_ENV: /home/circleci/.bashrc
     steps:
+      - run: env | sort && touch $BASH_ENV 
       - checkout
         # The default is 1.10, which is installed into /usr/local/bin/go
       - run: 
@@ -27,7 +17,7 @@ jobs:
           command: sudo apt-get install -y golang-go
       - run:
           name: Reconfigure golang
-          command: echo "export GOROOT=/usr/lib/go-1.13" >> ~/.bashrc && echo "export PATH=$GOROOT/bin:$PATH" >> ~/.bashrc
+          command: echo "export GOROOT=/usr/lib/go-1.13" >> $BASH_ENV && echo "export PATH=$GOROOT/bin:$PATH" >> $BASH_ENV
           # - run: echo $PATH && which go
           # - run: export GOROOT=/usr/lib/go-1.13 && export PATH=$GOROOT/bin:$PATH && echo $PATH && which go
       - run: go version || true
@@ -49,9 +39,19 @@ jobs:
         #        - setup_remote_docker
         #        - run:
 
-workflows:
-  version: 2
-  test:
-    jobs:
-    - test
-    - test_full
+# This is much faster than running a 'machine' (a VM) but it does not have 
+# systemd
+#   test-in-container:
+#     docker:
+#       - image: circleci/golang:1.13.6-buster
+#     steps:
+#       - checkout
+#       - run: go version || true
+#       - run: go env || true
+#       - run: go test -coverprofile=coverage.out
+#       - run: systemd --version || true
+#       - store_artifacts:
+#           path: coverage.out
+#           destination: coverage.out
+
+

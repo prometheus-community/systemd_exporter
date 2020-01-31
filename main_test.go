@@ -24,7 +24,9 @@ func TestMain(m *testing.M) {
 // TestNoop only exists as an example of how you can test
 func TestNoop(t *testing.T) {
 	noop := func() error { return nil }
-	runServerAndTest(defaultArgs, address, noop)
+	if err := runServerAndTest(defaultArgs, address, noop); err != nil {
+		t.Errorf("No op failed")
+	}
 }
 
 // TestVersionFlag is an example of running a test that does not rely on the server being
@@ -48,7 +50,9 @@ func TestMetricEndpointReturnsHttp200(t *testing.T) {
 		}
 		return nil
 	}
-	runServerAndTest(defaultArgs, address, test)
+	if err := runServerAndTest(defaultArgs, address, test); err != nil {
+		t.Errorf("Metric 200 failed")
+	}
 }
 
 func runServerAndTest(args []string, url string, fn func() error) error {

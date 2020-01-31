@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"sync"
 
 	"github.com/povilasv/prommod"
@@ -72,6 +73,7 @@ func mainCore() string {
 	kingpin.Version(prommod.Print(version.Print("systemd_exporter")))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
+	log.Debugf("Parsed '%s'", os.Args)
 
 	log.Infoln("Starting systemd_exporter", version.Info())
 	log.Infoln("Build context", version.BuildContext())

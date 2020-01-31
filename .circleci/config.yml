@@ -5,20 +5,53 @@ jobs:
       - image: circleci/golang:1.13.6-buster
     steps:
       - checkout
+      - run: go version || true
+      - run: go env || true
       - run: go test -coverprofile=coverage.out
       - run: systemd --version || true
       - store_artifacts:
           path: coverage.out
+          destination: coverage.out
 
   test_full:
     machine:
-      - image: ubuntu-1604:201903-01
+      image: ubuntu-1604:201903-01
     steps:
       - checkout
+        # The default is 1.10, which is installed into /usr/local/bin/go
+      - run: 
+          name: Setup golang-backports
+          command: sudo add-apt-repository ppa:longsleep/golang-backports && sudo apt-get update
+      - run: 
+          name: Install latest golang
+          command: sudo apt-get install -y golang-go
+      - run:
+          name: Reconfigure golang
+          command: echo "export GOROOT=/usr/lib/go-1.13" >> ~/.bashrc && echo "export PATH=$GOROOT/bin:$PATH" >> ~/.bashrc
+          # - run: echo $PATH && which go
+          # - run: export GOROOT=/usr/lib/go-1.13 && export PATH=$GOROOT/bin:$PATH && echo $PATH && which go
+      - run: go version || true
+      - run: systemd --version || true
+      - run: go env || true
+        # - run: go get || true
+        # - run: go build || true
       - run: go test -coverprofile=full_coverage.out
-      - run: systemd --versioni || true
       - store_artifacts:
           path: full_coverage.out
+          destination: full_coverage.out
 
 
+        #    containerize:
+        #      docker:
+        #        - image: docker:17.05.0-ce-git
+        #      steps:
+        #        - checkout
+        #        - setup_remote_docker
+        #        - run:
 
+workflows:
+  version: 2
+  test:
+    jobs:
+    - test
+    - test_full

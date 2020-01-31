@@ -12,7 +12,7 @@ dist: xenial
 go:
   - 1.x 
 
-before_script: systemd --version
+before_script: systemd --version && systemctl list-units
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)

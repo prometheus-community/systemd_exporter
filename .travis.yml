@@ -1,4 +1,18 @@
+dist: xenial
 language: go
 
 go:
   - "1.x"
+
+jobs:
+  include:
+    - name: testing
+      language: bash
+      script:
+        - ls
+    - name: t2
+      language: go
+      os: linux
+      dist: trusty
+
+

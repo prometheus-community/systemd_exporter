@@ -1,20 +1,13 @@
-dist: xenial
-language: go
 
+language: go
 go:
   - "1.x"
 
-jobs:
-  include:
-    - name: testing
-      language: bash
-      script:
-        - ls
-    - name: t2
-      language: go
-      os: linux
-      dist: xenial
-      after_success:
-       - bash <(curl -s https://codecov.io/bash)
+before_script: systemd --version
+os: linux
+dist: xenial
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
  
 

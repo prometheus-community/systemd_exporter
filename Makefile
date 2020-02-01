@@ -24,6 +24,7 @@ deps:
 .PHONY: test
 test:
 	go get github.com/stristr/go-acc
+	go list
 	go-acc ./...
 
 .PHONY: build

@@ -5,7 +5,7 @@ BRANCH := $(shell git branch | grep \* | cut -d ' ' -f2)
 
 LINT_FLAGS := run --deadline=120s
 LINTER := ./bin/golangci-lint
-TESTFLAGS := -v -cover -race -coverpkg=github.com/povilasv/systemd_exporter,github.com/povilasv/systemd_exporter/systemd -coverprofile=coverage.txt -covermode=atomic
+TEST_FLAGS := -v -cover -race -coverprofile=coverage.txt -covermode=atomic
 
 GO111MODULE := on
 all: $(LINTER) deps test lint build
@@ -27,9 +27,7 @@ ifdef TRAVIS
 	sudo sh -c 'echo DefaultCPUAccounting=yes >> /etc/systemd/system.conf'  
 	sudo systemctl daemon-reload
 endif 
-	go get github.com/stristr/go-acc
-	go list
-	go-acc ./...
+	go test $(TEST_FLAGS) ./...
 
 .PHONY: build
 build: deps

@@ -24,9 +24,8 @@ deps:
 .PHONY: test
 test:
 ifdef TRAVIS
-	sudo ls
-	sudo systemctl set-property cron.service MemoryAccounting=yes
-	sudo systemctl set-property cron.service CPUAccounting=yes 
+	sudo sh -c 'echo DefaultCPUAccounting=yes >> /etc/systemd/system.conf'  
+	sudo systemctl daemon-reload
 endif 
 	go get github.com/stristr/go-acc
 	go list

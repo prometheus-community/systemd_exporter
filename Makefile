@@ -23,6 +23,11 @@ deps:
 
 .PHONY: test
 test:
+ifdef TRAVIS
+	sudo ls
+	sudo systemctl set-property cron.service MemoryAccounting=yes
+	systemctl set-property cron.service CPUAccounting=yes 
+endif 
 	go get github.com/stristr/go-acc
 	go list
 	go-acc ./...

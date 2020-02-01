@@ -1,14 +1,32 @@
 package cgroup
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 const (
 	testFixturesHybrid = "fixtures/cgroup-hybrid"
 )
 
+func TestMountModeParsing(t *testing.T) {
+    // This test cannot (easily) use test fixtures, because it relies on being
+    // able to call Statfs on mounted filesystems. So we only run inside
+    // system where we expect to find cgroupfs mounted in a mode systemd expects.
+    // For now, that's only inside TravisCI, but in future we may expand to run
+    // this by default on certain Linux systems
+	if _, inTravisCI := os.LookupEnv("TRAVIS"); inTravisCI == false {
+    	return
+	}
+
+	if _, err := NewDefaultFS(); err != nil {
+		t.Errorf("expected success determining mount type inside of travis CI: %s", err)
+	}
+}
+
 func TestNewFS(t *testing.T) {
 	if _, err := newFS("foobar", unifModeUnknown); err == nil {
-		t.Error("want newFS to fail for non-existing path")
+		t.Error("newFS should have failed with non-existing path")
 	}
 
 	if _, err := newFS("cgroups_test.go", unifModeUnknown); err == nil {

@@ -17,7 +17,6 @@ go:
 
 before_script: systemd --version
 os: linux
-dist: xenial
 
 go:
   - 1.x 
@@ -27,4 +26,11 @@ before_script: systemd --version && systemctl list-units
 after_success:
   - bash <(curl -s https://codecov.io/bash)
  
+jobs:
+  include:
+  - dist: xenial
+    name: xenial-229
+  - dist: bionic
+    name: bionic-237
+
 

@@ -1,3 +1,13 @@
+# TODO Use CodeCov 'Flags' to separate coverage for integration tests and unit 
+# tests. Near 100% on integration is expected - these tests cast a wide net to 
+# catch many issues (but do not easily tell you where the issue is). Near 100%
+# on unit tests is a feat of heroism - these tests identify a specific code 
+# chunk with an issue. We mainly care about 100% on unit tests, but 100% on 
+# integration is an easy win and a nice to have 
+#
+# See https://docs.codecov.io/docs/flags
+# Use go get github.com/stristr/go-acc && go-acc ./...
+# Or use coverpkg=github.com/povilasv/systemd_exporter,github.com/povilasv/systemd_exporter/systemd
 
 # This defines the script for us automatically. By default it installs 
 # to requested go version then runs make

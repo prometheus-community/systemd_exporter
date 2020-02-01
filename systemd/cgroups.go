@@ -3,6 +3,7 @@ package systemd
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,6 +15,51 @@ import (
 	"github.com/prometheus/common/log"
 	"golang.org/x/sys/unix"
 )
+
+// FS is the pseudo-filesystem cgroupfs, which provides an interface to
+// kernel data structures
+type FS struct {
+	mountPoint string
+
+	// WARNING: We only read this data once at process start, systemd updates
+	// may require restarting systemd-exporter
+	cgroupUnified cgUnifiedMountMode
+}
+
+// DefaultMountPoint is the common mount point of the cgroupfs filesystem
+const DefaultMountPoint = "/sys/fs/cgroup"
+
+// NewDefaultFS returns a new cgroup FS mounted under the default mountPoint.
+// It will error if cgroup hierarchies are not laid out in a manner understood
+// by systemd.
+func NewDefaultFS() (FS, error) {
+
+	mode, err := cgUnifiedCached()
+	if err != nil || mode == unifModeUnknown {
+		return FS{}, fmt.Errorf("could not determine cgroupfs mount mode: %s", err)
+	}
+
+	return newFS(DefaultMountPoint, mode)
+}
+
+// newFS returns a new cgroup FS mounted under the given mountPoint. It does not check
+// the provided mount mode
+func newFS(mountPoint string, mountMode cgUnifiedMountMode) (FS, error) {
+	info, err := os.Stat(mountPoint)
+	if err != nil {
+		return FS{}, fmt.Errorf("could not read %s: %s", mountPoint, err)
+	}
+	if !info.IsDir() {
+		return FS{}, fmt.Errorf("mount point %s is not a directory", mountPoint)
+	}
+	return FS{mountPoint, mountMode}, nil
+}
+
+// path appends the given path elements to the filesystem path, adding separators
+// as necessary.
+func (fs FS) path(p ...string) string {
+	return filepath.Join(append([]string{string(fs.mountPoint)}, p...)...)
+}
 
 // cgUnifiedMountMode constant values describe how cgroup filesystems (aka hierarchies) are
 // mounted underneath /sys/fs/cgroup. In cgroups-v1 there are many mounts,
@@ -45,10 +91,6 @@ const (
 	unifModeAll cgUnifiedMountMode = iota
 )
 
-// WARNING: We only read this data once at process start, systemd updates
-// may require restarting systemd-exporter
-var cgroupUnified cgUnifiedMountMode = unifModeUnknown
-
 // Values copied from https://github.com/torvalds/linux/blob/master/include/uapi/linux/magic.h
 const (
 	tmpFsMagic        = 0x01021994
@@ -64,10 +106,11 @@ const (
 // to track this
 // WARNING: We cache this data once at process start. Systemd updates
 // may require restarting systemd-exporter
+// Equivalent to systemd cgUnifiedCached method
 func cgUnifiedCached() (cgUnifiedMountMode, error) {
-	if cgroupUnified != unifModeUnknown {
-		return cgroupUnified, nil
-	}
+	// if cgroupUnified != unifModeUnknown {
+	// 	return cgroupUnified, nil
+	// }
 
 	var fs unix.Statfs_t
 	err := unix.Statfs("/sys/fs/cgroup/", &fs)
@@ -78,14 +121,14 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 	switch fs.Type {
 	case cgroup2SuperMagic:
 		log.Debugf("Found cgroup2 on /sys/fs/cgroup, full unified hierarchy")
-		cgroupUnified = unifModeAll
+		return unifModeAll, nil
 	case tmpFsMagic:
 		err := unix.Statfs("/sys/fs/cgroup/unified", &fs)
 
 		// Ignore err, we expect path to be missing on v232
 		if err == nil && fs.Type == cgroup2SuperMagic {
 			log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller")
-			cgroupUnified = unifModeSystemd
+			return unifModeSystemd, nil
 		} else {
 			err := unix.Statfs("/sys/fs/cgroup/systemd", &fs)
 			if err != nil {
@@ -94,10 +137,10 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 			switch fs.Type {
 			case cgroup2SuperMagic:
 				log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)")
-				cgroupUnified = unifModeSystemd
+				return unifModeSystemd, nil
 			case cgroupSuperMagic:
 				log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
-				cgroupUnified = unifModeNone
+				return unifModeNone, nil
 			default:
 				return unifModeUnknown, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
 			}
@@ -105,20 +148,17 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 	default:
 		return unifModeUnknown, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup)", fs.Type)
 	}
-
-	return cgroupUnified, nil
 }
 
 // cgGetPath returns the absolute path for a specific file in a specific controller
 // in the specific cgroup denoted by the passed subpath.
-// Input examples: ("cpu", "/system.slice", "cpuacct.usage_all)
-func cgGetPath(controller string, subpath string, suffix string) (string, error) {
+// Input examples: ("cpu", "/system.slice", "cpuacct.usage_all")
+func (fs FS) cgGetPath(controller string, subpath string, suffix string) (string, error) {
 	// relevant systemd source code in cgroup-util.[h|c] specifically cg_get_path
 	//  2. Joins controller name with base path
 
-	unified, err := cgUnifiedCached()
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
+	if fs.cgroupUnified == unifModeUnknown {
+		return "", errors.Errorf("Cannot determine path with unknown mounting hierarchy")
 	}
 
 	// TODO Ensure controller name is valid
@@ -126,13 +166,13 @@ func cgGetPath(controller string, subpath string, suffix string) (string, error)
 	dn := controller
 
 	joined := ""
-	switch unified {
+	switch fs.cgroupUnified {
 	case unifModeNone, unifModeSystemd:
-		joined = filepath.Join("/sys/fs/cgroup", dn, subpath, suffix)
+		joined = fs.path(dn, subpath, suffix)
 	case unifModeAll:
-		joined = filepath.Join("/sys/fs/cgroup", subpath, suffix)
+		joined = fs.path(subpath, suffix)
 	default:
-		return "", errors.Errorf("unknown cgroup mount mode (e.g. unified mode) %d", unified)
+		return "", errors.Errorf("unknown cgroup mount mode (e.g. unified mode) %d", fs.cgroupUnified)
 	}
 	return joined, nil
 }
@@ -204,9 +244,19 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 // NewCPUAcct will locate and read the kernel's cpu accounting info for
 // the provided systemd cgroup subpath.
 func NewCPUAcct(cgSubpath string) (*CPUAcct, error) {
+	fs, err := NewDefaultFS()
+	if err != nil {
+		return nil, err
+	}
+	return fs.NewCPUAcct(cgSubpath)
+}
+
+// NewCPUAcct will locate and read the kernel's cpu accounting info for
+// the provided systemd cgroup subpath.
+func (fs FS) NewCPUAcct(cgSubpath string) (*CPUAcct, error) {
 	var cpuUsage CPUAcct
 
-	cgPath, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all")
+	cgPath, err := fs.cgGetPath("cpu", cgSubpath, "cpuacct.usage_all")
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to get cpu controller path")
 	}

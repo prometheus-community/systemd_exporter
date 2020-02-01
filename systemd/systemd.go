@@ -12,6 +12,7 @@ import (
 
 	"github.com/coreos/go-systemd/dbus"
 	"github.com/pkg/errors"
+	"github.com/povilasv/systemd_exporter/cgroup"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/procfs"
@@ -559,7 +560,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return nil
 	}
 
-	cpuUsage, err := NewCPUAcct(cgSubpath)
+	cpuUsage, err := cgroup.NewCPUAcct(cgSubpath)
 	if err != nil {
 		if unitType == "Socket" {
 			log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)

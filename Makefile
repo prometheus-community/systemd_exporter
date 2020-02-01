@@ -23,7 +23,7 @@ deps:
 
 .PHONY: test
 test:
-	go get github.com/ory/go-acc
+	go get github.com/stristr/go-acc
 	go-acc ./...
 
 .PHONY: build

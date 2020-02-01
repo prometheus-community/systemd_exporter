@@ -79,7 +79,7 @@ Note that a number of unit types are filtered by default
 | ----------------------------------------- | ----------- | -------- | ------------------------------------------------------------------ |
 | systemd_exporter_build_info               | Gauge       | UNSTABLE | 1 per systemd-exporter                                             |
 | systemd_unit_info                         | Gauge       | UNSTABLE | 1 per service + 1 per mount                                        |
-| systemd_unit_cpu_seconds_total            | Gauge       | UNSTABLE | 2 per mount/scope/slice/socket/swap {mode="system/user"}           |
+| systemd_unit_cpu_seconds_total            | Gauge       | UNSTABLE | <sup>1</sup>2 per mount/scope/slice/socket/swap {mode="system/user"}           |
 | systemd_unit_state                        | Gauge       | UNSTABLE | 5 per unit {state="activating/active/deactivating/failed/inactive} |
 | systemd_unit_tasks_current                | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_unit_tasks_max                    | Gauge       | UNSTABLE | 1 per service                                                      |
@@ -95,3 +95,5 @@ Note that a number of unit types are filtered by default
 | systemd_process_open_fds                  | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_process_max_fds                   | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_process_cpu_seconds_total         | Counter     | UNSTABLE | 1 per service                                                      |
+
+<sup>1</sup>Only present for units which have systemd `CPUAccounting` enabled

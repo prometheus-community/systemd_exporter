@@ -651,7 +651,7 @@ func (c *Collector) collectUnitMemUsageMetrics(unitType string, conn *dbus.Conn,
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitMemCache, prometheus.GaugeValue,
-		float64(memStat.Cache), unit.Name, parseUnitType(unit), "user")
+		float64(memStat.Cache), unit.Name, parseUnitType(unit))
 
 	return nil
 }

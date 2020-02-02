@@ -57,6 +57,8 @@ type Collector struct {
 	socketRefusedConnectionsDesc  *prometheus.Desc
 	cpuTotalDesc                  *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
+
+	unitMemCache					*prometheus.Desc
 	openFDs                       *prometheus.Desc
 	maxFDs                        *prometheus.Desc
 	vsize                         *prometheus.Desc
@@ -136,6 +138,12 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		[]string{"name", "type", "mode"}, nil,
 	)
 
+	unitMemCache := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_cached_bytes"),
+		"Unit Memory Cached in bytes",
+		[]string{"name", "type"}, nil,
+	)
+
 	openFDs := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "process_open_fds"),
 		"Number of open file descriptors.",
@@ -181,6 +189,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
 		cpuTotalDesc:                  cpuTotalDesc,
 		unitCPUTotal:                  unitCPUTotal,
+		unitMemCache:                  unitMemCache,
 		openFDs:                       openFDs,
 		maxFDs:                        maxFDs,
 		vsize:                         vsize,
@@ -298,6 +307,10 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
 		err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
+		if err != nil {
+			logger.Warnf(errUnitMetricsMsg, err)
+		}
+		err = c.collectUnitMemUsageMetrics("Service", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
@@ -579,6 +592,66 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 	ch <- prometheus.MustNewConstMetric(
 		c.unitCPUTotal, prometheus.CounterValue,
 		sysSeconds, unit.Name, parseUnitType(unit), "system")
+
+	return nil
+}
+
+// A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
+// resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
+func (c *Collector) collectUnitMemUsageMetrics(unitType string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	propCGSubpath, err := conn.GetUnitTypeProperty(unit.Name, unitType, "ControlGroup")
+	if err != nil {
+		return errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
+	}
+	cgSubpath, ok := propCGSubpath.Value.Value().(string)
+	if !ok {
+		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
+	}
+
+	switch {
+	case cgSubpath == "" && unit.ActiveState == "inactive",
+		cgSubpath == "" && unit.ActiveState == "failed":
+		// Expected condition, systemd has cleaned up and
+		// we have nothing to record
+		return nil
+	case cgSubpath == "" && unit.ActiveState == "active":
+		// Unexpected. Why is there no cgroup on an active unit?
+		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
+		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
+		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
+	case cgSubpath == "":
+		// We are likely reading a unit that is currently changing state, so
+		// we record this and bail
+		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
+		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
+		log.Debugf("Read 'no cgroup' from unit (name=%s state=%s subtype=%s slice=%s) ", unit.Name, unit.ActiveState, subType, slice)
+		return nil
+	}
+
+	propMemAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "MemoryAccounting")
+	if err != nil {
+		return errors.Wrapf(err, errGetPropertyMsg, "MemoryAccounting")
+	}
+	memAcct, ok := propMemAcct.Value.Value().(bool)
+	if !ok {
+		return errors.Errorf(errConvertStringPropertyMsg, "MemoryAccounting", propMemAcct.Value.Value())
+	}
+	if !memAcct {
+		return nil
+	}
+
+	memStat, err := cgroup.NewMemStat(cgSubpath)
+	if err != nil {
+		// if unitType == "Socket" {
+		//	log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
+	// 		return nil
+		// }
+		return errors.Wrapf(err, errControlGroupReadMsg, "Memory stat")
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.unitMemCache, prometheus.GaugeValue,
+		float64(memStat.Cache), unit.Name, parseUnitType(unit), "user")
 
 	return nil
 }

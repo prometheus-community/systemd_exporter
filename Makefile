@@ -25,6 +25,7 @@ deps:
 test:
 ifdef TRAVIS
 	sudo sh -c 'echo DefaultCPUAccounting=yes >> /etc/systemd/system.conf'  
+	sudo sh -c 'echo DefaultMemoryAccounting=yes >> /etc/systemd/system.conf'
 	sudo systemctl daemon-reload
 endif 
 	go test $(TEST_FLAGS) ./...

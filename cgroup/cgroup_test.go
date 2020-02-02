@@ -10,13 +10,13 @@ const (
 )
 
 func TestMountModeParsing(t *testing.T) {
-    // This test cannot (easily) use test fixtures, because it relies on being
-    // able to call Statfs on mounted filesystems. So we only run inside
-    // system where we expect to find cgroupfs mounted in a mode systemd expects.
-    // For now, that's only inside TravisCI, but in future we may expand to run
-    // this by default on certain Linux systems
+	// This test cannot (easily) use test fixtures, because it relies on being
+	// able to call Statfs on mounted filesystems. So we only run inside
+	// system where we expect to find cgroupfs mounted in a mode systemd expects.
+	// For now, that's only inside TravisCI, but in future we may expand to run
+	// this by default on certain Linux systems
 	if _, inTravisCI := os.LookupEnv("TRAVIS"); inTravisCI == false {
-    	return
+		return
 	}
 
 	if _, err := NewDefaultFS(); err != nil {
@@ -50,7 +50,7 @@ func TestCgSubpath(t *testing.T) {
 	fs := getHybridFixtures(t)
 
 	fs.cgroupUnified = unifModeUnknown
-	if _,err := fs.cgGetPath("cpu", "/system.slice", "cpuacct.usage_all"); err == nil {
+	if _, err := fs.cgGetPath("cpu", "/system.slice", "cpuacct.usage_all"); err == nil {
 		t.Error("should not be able to determine path with unknown mount mode")
 	}
 	fs.cgroupUnified = unifModeSystemd
@@ -63,5 +63,3 @@ func TestCgSubpath(t *testing.T) {
 		t.Errorf("bad response. Wanted %s, got %s", want, path)
 	}
 }
-
-

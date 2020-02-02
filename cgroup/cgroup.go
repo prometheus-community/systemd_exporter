@@ -169,5 +169,3 @@ func (fs FS) cgGetPath(controller string, subpath string, suffix string) (string
 	}
 	return joined, nil
 }
-
-

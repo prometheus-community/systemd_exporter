@@ -2,7 +2,6 @@ package cgroup
 
 import "testing"
 
-
 func TestNewCPUAcct(t *testing.T) {
 	fs := getHybridFixtures(t)
 	cpu, err := fs.NewCPUAcct("/")
@@ -21,17 +20,15 @@ func TestNewCPUAcct(t *testing.T) {
 
 	var expectedSys uint64 = 619186701953
 	if cpu.UsageSystemNanosecs() != expectedSys {
-		t.Errorf("Wrong sys nanoseconds. Wanted %d got %d",expectedSys, cpu.UsageSystemNanosecs())
+		t.Errorf("Wrong sys nanoseconds. Wanted %d got %d", expectedSys, cpu.UsageSystemNanosecs())
 	}
 
 	expectedTotal := expectedSys + expectedUser
 	if cpu.UsageAllNanosecs() != expectedTotal {
-		t.Errorf("Wrong total nanoseconds. Wanted %d got %d",expectedTotal, cpu.UsageAllNanosecs())
+		t.Errorf("Wrong total nanoseconds. Wanted %d got %d", expectedTotal, cpu.UsageAllNanosecs())
 	}
 
 	if _, err := fs.NewCPUAcct("foobar"); err == nil {
 		t.Errorf("expected error getting cpu accounting info for bogus cgroup")
 	}
 }
-
-

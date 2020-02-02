@@ -85,7 +85,6 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 	return ioutil.ReadAll(reader)
 }
 
-
 // NewCPUAcct will locate and read the kernel's cpu accounting info for
 // the provided systemd cgroup subpath.
 func (fs FS) NewCPUAcct(cgSubpath string) (*CPUAcct, error) {

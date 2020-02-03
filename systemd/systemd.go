@@ -145,7 +145,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 
 	unitMemCache := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cached_bytes"),
-		"Unit Page Cache",
+		"Unit Page CacheBytes",
 		[]string{"name", "type"}, nil,
 	)
 	unitMemRss := prometheus.NewDesc(
@@ -630,13 +630,13 @@ func (c *Collector) collectUnitMemMetrics(cgSubpath string, conn *dbus.Conn, ch 
 	unitType := parseUnitType(unit)
 	ch <- prometheus.MustNewConstMetric(
 		c.unitMemCache, prometheus.GaugeValue,
-		float64(memStat.Cache), unit.Name, unitType)
+		float64(memStat.CacheBytes), unit.Name, unitType)
 	ch <- prometheus.MustNewConstMetric(
 		c.unitMemRss, prometheus.GaugeValue,
-		float64(memStat.Rss), unit.Name, unitType)
+		float64(memStat.RssBytes), unit.Name, unitType)
 	ch <- prometheus.MustNewConstMetric(
 		c.unitMemDirty, prometheus.GaugeValue,
-		float64(memStat.Dirty), unit.Name, unitType)
+		float64(memStat.DirtyBytes), unit.Name, unitType)
 	ch <- prometheus.MustNewConstMetric(
 		c.unitMemShmem, prometheus.GaugeValue,
 		float64(memStat.Shmem), unit.Name, unitType)

@@ -14,22 +14,22 @@ import (
 // memory.stat file
 type MemStat struct {
 	// bytes of page cache memory
-	Cache uint64
+	CacheBytes uint64
 	// bytes of anon and swap cache, including transparent hugepages.
 	// Note: Only anonymous and swap cache memory is listed as part of 'rss' stat.
 	// This should not be confused with the true 'resident set size' or the
 	// amount of physical memory used by the cgroup. 'rss + file_mapped" will
 	// give you resident set size of cgroup
-	Rss uint64
+	RssBytes uint64
 	// bytes of anonymous transparent hugepages
-	RssHuge uint64
+	RssHugeBytes uint64
 	// No kernel documentation
 	Shmem uint64
 	// bytes of mapped files (includes tmpfs/shmem)
-	MappedFile uint64
+	MappedFileBytes uint64
 	// number of charging events to the memory cgroup. The charging
 	// event happens each time a page is accounted as either mapped
-	// anon page(RSS) or cache page(Page Cache) to the cgroup.
+	// anon page(RSS) or cache page(Page CacheBytes) to the cgroup.
 	PgPgIn uint64
 	// # of uncharging events to the memory cgroup. The uncharging
 	// event happens each time a page is unaccounted from the cgroup.
@@ -39,42 +39,42 @@ type MemStat struct {
 	// no kernel documentation
 	PgMajFault uint64
 	// # of bytes of swap usage
-	Swap uint64
+	SwapBytes uint64
 	// # of bytes that are waiting to get written back to the disk.
-	Dirty uint64
+	DirtyBytes uint64
 	// writeback	- # of bytes of file/anon cache that are queued for syncing to
 	// disk.
-	Writeback uint64
+	WritebackBytes uint64
 	// inactive_anon	- # of bytes of anonymous and swap cache memory on inactive
 	// LRU list.
-	InactiveAnon uint64
+	InactiveAnonBytes uint64
 	// active_anon	- # of bytes of anonymous and swap cache memory on active
 	// LRU list.
-	ActiveAnon uint64
+	ActiveAnonBytes uint64
 	// inactive_file	- # of bytes of file-backed memory on inactive LRU list.
-	InactiveFile uint64
+	InactiveFileBytes uint64
 	// active_file	- # of bytes of file-backed memory on active LRU list.
-	ActiveFile uint64
+	ActiveFileBytes uint64
 	// unevictable	- # of bytes of memory that cannot be reclaimed (mlocked etc).
-	Unevictable uint64
+	UnevictableBytes uint64
 
 	// status considering hierarchy (see memory.use_hierarchy settings)
 	// # of bytes of memory limit with regard to hierarchy
 	// under which the memory cgroup is
-	HierarchialMemoryLimit uint64
+	HierarchialMemoryLimitBytes uint64
 	// # of bytes of memory+swap limit with regard to
 	// hierarchy under which memory cgroup is.
-	HierarchialMemswLimit uint64
+	HierarchialMemswLimitBytes uint64
 	// total_cache		- sum of all children's "cache"
-	TotalCache uint64
+	TotalCacheBytes uint64
 	// No kernel doc
-	TotalDirty uint64
+	TotalDirtyBytes uint64
 	// total_rss		- sum of all children's "rss"
-	TotalRss uint64
+	TotalRssBytes uint64
 	// No kernel docs
-	TotalRssHuge uint64
+	TotalRssHugeBytes uint64
 	// total_mapped_file	- sum of all children's "cache"
-	TotalMappedFile uint64
+	TotalMappedFileBytes uint64
 	// No kernel docs
 	TotalPgFault uint64
 	// No kernel docs
@@ -84,28 +84,27 @@ type MemStat struct {
 	// total_pgpgout		- sum of all children's "pgpgout"
 	TotalPgPgOut uint64
 	// No kernel doc
-	TotalShmem uint64
+	TotalShmemBytes uint64
 	// total_swap		- sum of all children's "swap"
-	TotalSwap uint64
+	TotalSwapBytes uint64
 	// total_inactive_anon	- sum of all children's "inactive_anon"
-	TotalInactiveAnon uint64
+	TotalInactiveAnonBytes uint64
 	// total_active_anon	- sum of all children's "active_anon"
-	TotalActiveAnon uint64
+	TotalActiveAnonBytes uint64
 	// total_inactive_file	- sum of all children's "inactive_file"
-	TotalInactiveFile uint64
+	TotalInactiveFileBytes uint64
 	// total_active_file	- sum of all children's "active_file"
-	TotalActiveFile uint64
+	TotalActiveFileBytes uint64
 	// total_unevictable	- sum of all children's "unevictable"
-	TotalUnevictable uint64
+	TotalUnevictableBytes uint64
 	// No kernel doc
-	TotalWriteback uint64
+	TotalWritebackBytes uint64
 	// 	# The following additional stats are dependent on CONFIG_DEBUG_VM.
 	// 	inactive_ratio		- VM internal parameter. (see mm/page_alloc.c)
 	// 	recent_rotated_anon	- VM internal parameter. (see mm/vmscan.c)
 	// 	recent_rotated_file	- VM internal parameter. (see mm/vmscan.c)
 	// 	recent_scanned_anon	- VM internal parameter. (see mm/vmscan.c)
 	// 	recent_scanned_file	- VM internal parameter. (see mm/vmscan.c)
-
 }
 
 func parseMemStat(r io.Reader) (*MemStat, error) {
@@ -125,21 +124,21 @@ func parseMemStat(r io.Reader) (*MemStat, error) {
 
 		switch fields[0] {
 		case "cache":
-			m.Cache = v
+			m.CacheBytes = v
 		case "rss":
-			m.Rss = v
+			m.RssBytes = v
 		case "rss_huge":
-			m.RssHuge = v
+			m.RssHugeBytes = v
 		case "shmem":
 			m.Shmem = v
 		case "mapped_file":
-			m.MappedFile = v
+			m.MappedFileBytes = v
 		case "dirty":
-			m.Dirty = v
+			m.DirtyBytes = v
 		case "writeback":
-			m.Writeback = v
+			m.WritebackBytes = v
 		case "swap":
-			m.Swap = v
+			m.SwapBytes = v
 		case "pgpgin":
 			m.PgPgIn = v
 		case "pgpgout":
@@ -149,35 +148,35 @@ func parseMemStat(r io.Reader) (*MemStat, error) {
 		case "pgmajfault":
 			m.PgMajFault = v
 		case "inactive_anon":
-			m.InactiveAnon = v
+			m.InactiveAnonBytes = v
 		case "active_anon":
-			m.ActiveAnon = v
+			m.ActiveAnonBytes = v
 		case "inactive_file":
-			m.InactiveFile = v
+			m.InactiveFileBytes = v
 		case "active_file":
-			m.ActiveFile = v
+			m.ActiveFileBytes = v
 		case "unevictable":
-			m.Unevictable = v
+			m.UnevictableBytes = v
 		case "hierarchical_memory_limit":
-			m.HierarchialMemoryLimit = v
+			m.HierarchialMemoryLimitBytes = v
 		case "hierarchical_memsw_limit":
-			m.HierarchialMemswLimit = v
+			m.HierarchialMemswLimitBytes = v
 		case "total_cache":
-			m.TotalCache = v
+			m.TotalCacheBytes = v
 		case "total_rss":
-			m.TotalRss = v
+			m.TotalRssBytes = v
 		case "total_rss_huge":
-			m.TotalRssHuge = v
+			m.TotalRssHugeBytes = v
 		case "total_shmem":
-			m.TotalShmem = v
+			m.TotalShmemBytes = v
 		case "total_mapped_file":
-			m.TotalMappedFile = v
+			m.TotalMappedFileBytes = v
 		case "total_dirty":
-			m.TotalDirty = v
+			m.TotalDirtyBytes = v
 		case "total_writeback":
-			m.TotalWriteback = v
+			m.TotalWritebackBytes = v
 		case "total_swap":
-			m.TotalSwap = v
+			m.TotalSwapBytes = v
 		case "total_pgpgin":
 			m.TotalPgPgIn = v
 		case "total_pgpgout":
@@ -187,15 +186,15 @@ func parseMemStat(r io.Reader) (*MemStat, error) {
 		case "total_pgmajfault":
 			m.TotalPgMajFault = v
 		case "total_inactive_anon":
-			m.TotalInactiveAnon = v
+			m.TotalInactiveAnonBytes = v
 		case "total_inactive_file":
-			m.TotalInactiveFile = v
+			m.TotalInactiveFileBytes = v
 		case "total_active_anon":
-			m.TotalActiveAnon = v
+			m.TotalActiveAnonBytes = v
 		case "total_active_file":
-			m.TotalActiveFile = v
+			m.TotalActiveFileBytes = v
 		case "total_unevictable":
-			m.TotalUnevictable = v
+			m.TotalUnevictableBytes = v
 		}
 	}
 

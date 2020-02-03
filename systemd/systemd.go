@@ -234,6 +234,13 @@ func parseUnitType(unit dbus.UnitStatus) string {
 	return t[len(t)-1]
 }
 
+// parseUnitTypeInterface extracts the dbus interface suffix for the interface unique to the passed unit type.
+// For example, a systemd "service unit" will be are exposed on dbus as "service objects", and all "service objects"
+// implement the org.freedesktop.systemd1.Service interface. This is used as input for dbus.GetUnitTypeProperty
+func parseUnitTypeInterface(unit dbus.UnitStatus) string {
+	return strings.Title(parseUnitType(unit))
+}
+
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
@@ -307,11 +314,22 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-		err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
+
+		cgroupPath, err := c.getControlGroup(conn, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-		err = c.collectUnitMemUsageMetrics("Service", conn, ch, unit)
+
+		// Everything below requires a cgroup
+		if cgroupPath == nil {
+			break
+		}
+
+		err = c.collectUnitCPUMetrics(*cgroupPath, conn, ch, unit)
+		if err != nil {
+			logger.Warnf(errUnitMetricsMsg, err)
+		}
+		err = c.collectUnitMemMetrics("Service", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
@@ -320,7 +338,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-		err = c.collectUnitCPUUsageMetrics("Mount", conn, ch, unit)
+		err = c.collectUnitCPUMetrics("Mount", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
@@ -336,17 +354,17 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		}
 		// Most sockets do not have a cpu cgroupfs entry, but a
 		// few do, notably docker.socket
-		err = c.collectUnitCPUUsageMetrics("Socket", conn, ch, unit)
+		err = c.collectUnitCPUMetrics("Socket", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-		err = c.collectUnitCPUUsageMetrics("Swap", conn, ch, unit)
 	case "swap":
+		err = c.collectUnitCPUMetrics("Swap", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-		err = c.collectUnitCPUUsageMetrics("Slice", conn, ch, unit)
 	case "slice":
+		err = c.collectUnitCPUMetrics("Slice", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
@@ -531,16 +549,15 @@ func (c *Collector) mustGetUnitStringTypeProperty(unitType string,
 	return propVal
 }
 
-// A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
-// resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
-func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	propCGSubpath, err := conn.GetUnitTypeProperty(unit.Name, unitType, "ControlGroup")
+func (c *Collector) getControlGroup(conn *dbus.Conn, unit dbus.UnitStatus) (*string, error) {
+	unitTypeInterface := parseUnitTypeInterface(unit)
+	propCGSubpath, err := conn.GetUnitTypeProperty(unit.Name, unitTypeInterface, "ControlGroup")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
+		return nil, errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
 	}
 	cgSubpath, ok := propCGSubpath.Value.Value().(string)
 	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
+		return nil, errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
 	}
 
 	switch {
@@ -548,22 +565,29 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		cgSubpath == "" && unit.ActiveState == "failed":
 		// Expected condition, systemd has cleaned up and
 		// we have nothing to record
-		return nil
+		return nil, nil
 	case cgSubpath == "" && unit.ActiveState == "active":
 		// Unexpected. Why is there no cgroup on an active unit?
-		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
-		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
+		subType := c.mustGetUnitStringTypeProperty(unitTypeInterface, "Type", "unknown", conn, unit)
+		slice := c.mustGetUnitStringTypeProperty(unitTypeInterface, "Slice", "unknown", conn, unit)
+		return nil, errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
 	case cgSubpath == "":
 		// We are likely reading a unit that is currently changing state, so
 		// we record this and bail
-		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
-		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
+		subType := c.mustGetUnitStringTypeProperty(unitTypeInterface, "Type", "unknown", conn, unit)
+		slice := c.mustGetUnitStringTypeProperty(unitTypeInterface, "Slice", "unknown", conn, unit)
 		log.Debugf("Read 'no cgroup' from unit (name=%s state=%s subtype=%s slice=%s) ", unit.Name, unit.ActiveState, subType, slice)
-		return nil
+		return nil, nil
+	default:
+		return &cgSubpath, nil
 	}
+}
 
-	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "CPUAccounting")
+// A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
+// resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
+func (c *Collector) collectUnitCPUMetrics(cgSubpath string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	unitTypeInterface := parseUnitTypeInterface(unit)
+	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitTypeInterface, "CPUAccounting")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "CPUAccounting")
 	}
@@ -577,7 +601,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 
 	cpuUsage, err := cgroup.NewCPUAcct(cgSubpath)
 	if err != nil {
-		if unitType == "Socket" {
+		if unitTypeInterface == "Socket" {
 			log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
 			return nil
 		}
@@ -597,52 +621,18 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 	return nil
 }
 
-// A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
-// resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
-func (c *Collector) collectUnitMemUsageMetrics(unitType string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	propCGSubpath, err := conn.GetUnitTypeProperty(unit.Name, unitType, "ControlGroup")
-	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
-	}
-	cgSubpath, ok := propCGSubpath.Value.Value().(string)
-	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "ControlGroup", propCGSubpath.Value.Value())
-	}
-
-	switch {
-	case cgSubpath == "" && unit.ActiveState == "inactive",
-		cgSubpath == "" && unit.ActiveState == "failed":
-		// Expected condition, systemd has cleaned up and
-		// we have nothing to record
-		return nil
-	case cgSubpath == "" && unit.ActiveState == "active":
-		// Unexpected. Why is there no cgroup on an active unit?
-		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
-		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
-	case cgSubpath == "":
-		// We are likely reading a unit that is currently changing state, so
-		// we record this and bail
-		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
-		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		log.Debugf("Read 'no cgroup' from unit (name=%s state=%s subtype=%s slice=%s) ", unit.Name, unit.ActiveState, subType, slice)
-		return nil
-	}
-
-	propMemAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "MemoryAccounting")
-	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "MemoryAccounting")
-	}
-	memAcct, ok := propMemAcct.Value.Value().(bool)
-	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "MemoryAccounting", propMemAcct.Value.Value())
-	}
-	if !memAcct {
-		return nil
-	}
-
+func (c *Collector) collectUnitMemMetrics(cgSubpath string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	// Don't bother reading MemoryAccounting prop. It's faster to attempt a file read than to query dbus, and it works
+	// in more situations as well. For ex: case where
+	// such as kernel cmdline has cgroups_enabled=memory but systemd still has DefaultMemoryAccounting=no. All cgroups
+	// will have a memory.stat file, but systemd will still report MemoryAccounting=false for most units
 	memStat, err := cgroup.NewMemStat(cgSubpath)
 	if err != nil {
+		// Unable to open the file
+		if perr, ok := err.(*os.PathError); ok && perr.Op == "open" {
+			return nil
+		}
+
 		// if unitType == "Socket" {
 		//	log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
 	// 		return nil

@@ -286,59 +286,56 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		// TODO should we continue processing here?
 	}
 
+	// Collect metrics from cgroups
+	switch parseUnitType(unit) {
+	// Most sockets do not have a cpu cgroupfs entry, but a
+	// few do, notably docker.socket
+	case "service", "mount","socket", "swap", "slice":
+		cgroupPath, err := c.getControlGroup(conn, unit)
+		if err != nil {
+			logger.Warnf(errUnitMetricsMsg, err)
+		}
+		// Everything below requires a cgroup
+		if cgroupPath == nil {
+			break
+		}
+		err = c.collectUnitCPUMetrics(*cgroupPath, conn, ch, unit)
+		if err != nil {
+			logger.Warnf(errUnitMetricsMsg, err)
+		}
+		err = c.collectUnitMemMetrics(*cgroupPath, conn, ch, unit)
+		if err != nil {
+			logger.Warnf(errUnitMetricsMsg, err)
+		}
+	}
+
+	// Collect metrics from dbus
 	switch parseUnitType(unit) {
 	case "service":
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-
 		err = c.collectServiceStartTimeMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-
 		if *enableRestartsMetrics {
 			err = c.collectServiceRestartCount(conn, ch, unit)
 			if err != nil {
 				logger.Warnf(errUnitMetricsMsg, err)
 			}
 		}
-
 		err = c.collectServiceTasksMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-
 		err = c.collectServiceProcessMetrics(conn, ch, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-
-		cgroupPath, err := c.getControlGroup(conn, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-
-		// Everything below requires a cgroup
-		if cgroupPath == nil {
-			break
-		}
-
-		err = c.collectUnitCPUMetrics(*cgroupPath, conn, ch, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-		err = c.collectUnitMemMetrics("Service", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
 	case "mount":
 		err = c.collectMountMetainfo(conn, ch, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-		err = c.collectUnitCPUMetrics("Mount", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
@@ -349,22 +346,6 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		}
 	case "socket":
 		err := c.collectSocketConnMetrics(conn, ch, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-		// Most sockets do not have a cpu cgroupfs entry, but a
-		// few do, notably docker.socket
-		err = c.collectUnitCPUMetrics("Socket", conn, ch, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-	case "swap":
-		err = c.collectUnitCPUMetrics("Swap", conn, ch, unit)
-		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
-		}
-	case "slice":
-		err = c.collectUnitCPUMetrics("Slice", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}

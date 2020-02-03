@@ -668,7 +668,7 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 		return errors.Wrapf(err, errGetPropertyMsg, "NRefused")
 	}
 	ch <- prometheus.MustNewConstMetric(
-		c.socketRefusedConnectionsDesc, prometheus.GaugeValue,
+		c.socketRefusedConnectionsDesc, prometheus.CounterValue,
 		float64(refusedConnectionCount.Value.Value().(uint32)), unit.Name)
 
 	return nil

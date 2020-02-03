@@ -567,21 +567,14 @@ func (c *Collector) getControlGroup(conn *dbus.Conn, unit dbus.UnitStatus) (*str
 // A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
 // resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
 func (c *Collector) collectUnitCPUMetrics(cgSubpath string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	// Don't bother reading CPUAccounting prop. It's faster to attempt a file read than to query dbus, and it works
+	// in more situations as well
 	unitTypeInterface := parseUnitTypeInterface(unit)
-	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitTypeInterface, "CPUAccounting")
-	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "CPUAccounting")
-	}
-	cpuAcct, ok := propCPUAcct.Value.Value().(bool)
-	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "CPUAccounting", propCPUAcct.Value.Value())
-	}
-	if !cpuAcct {
-		return nil
-	}
-
 	cpuUsage, err := cgroup.NewCPUAcct(cgSubpath)
 	if err != nil {
+		if perr, ok := err.(*os.PathError); ok && perr.Op == "open" {
+			return nil
+		}
 		if unitTypeInterface == "Socket" {
 			log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
 			return nil

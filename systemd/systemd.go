@@ -288,8 +288,6 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 
 	// Collect metrics from cgroups
 	switch parseUnitType(unit) {
-	// Most sockets do not have a cpu cgroupfs entry, but a
-	// few do, notably docker.socket
 	case "service", "mount","socket", "swap", "slice":
 		cgroupPath, err := c.getControlGroup(conn, unit)
 		if err != nil {
@@ -301,7 +299,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		}
 		err = c.collectUnitCPUMetrics(*cgroupPath, conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			// Most sockets do not have a cpu cgroupfs entry, but a few big ones do (notably docker.socket). Quiet down
+			// error reporting if error came from a socket
+			if parseUnitType(unit) != "socket" {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
 		}
 		err = c.collectUnitMemMetrics(*cgroupPath, conn, ch, unit)
 		if err != nil {
@@ -569,14 +571,9 @@ func (c *Collector) getControlGroup(conn *dbus.Conn, unit dbus.UnitStatus) (*str
 func (c *Collector) collectUnitCPUMetrics(cgSubpath string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	// Don't bother reading CPUAccounting prop. It's faster to attempt a file read than to query dbus, and it works
 	// in more situations as well
-	unitTypeInterface := parseUnitTypeInterface(unit)
 	cpuUsage, err := cgroup.NewCPUAcct(cgSubpath)
 	if err != nil {
 		if perr, ok := err.(*os.PathError); ok && perr.Op == "open" {
-			return nil
-		}
-		if unitTypeInterface == "Socket" {
-			log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
 			return nil
 		}
 		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")

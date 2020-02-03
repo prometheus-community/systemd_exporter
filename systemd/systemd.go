@@ -59,12 +59,16 @@ type Collector struct {
 	cpuTotalDesc                  *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 
-	unitMemCache					*prometheus.Desc
-	openFDs                       *prometheus.Desc
-	maxFDs                        *prometheus.Desc
-	vsize                         *prometheus.Desc
-	maxVsize                      *prometheus.Desc
-	rss                           *prometheus.Desc
+	unitMemCache *prometheus.Desc
+	unitMemRss   *prometheus.Desc
+	unitMemDirty *prometheus.Desc
+	unitMemShmem *prometheus.Desc
+
+	openFDs  *prometheus.Desc
+	maxFDs   *prometheus.Desc
+	vsize    *prometheus.Desc
+	maxVsize *prometheus.Desc
+	rss      *prometheus.Desc
 
 	unitWhitelistPattern *regexp.Regexp
 	unitBlacklistPattern *regexp.Regexp
@@ -141,7 +145,22 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 
 	unitMemCache := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cached_bytes"),
-		"Unit Memory Cached in bytes",
+		"Unit Page Cache",
+		[]string{"name", "type"}, nil,
+	)
+	unitMemRss := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_rss_bytes"),
+		"Unit anon+swap cache, incl. transparent hugepages. Not true RSS",
+		[]string{"name", "type"}, nil,
+	)
+	unitMemDirty := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_dirty_bytes"),
+		"Unit bytes waiting to get written to disk",
+		[]string{"name", "type"}, nil,
+	)
+	unitMemShmem := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_shmem_bytes"),
+		"",
 		[]string{"name", "type"}, nil,
 	)
 
@@ -191,6 +210,9 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		cpuTotalDesc:                  cpuTotalDesc,
 		unitCPUTotal:                  unitCPUTotal,
 		unitMemCache:                  unitMemCache,
+		unitMemRss:                    unitMemRss,
+		unitMemDirty:                  unitMemDirty,
+		unitMemShmem:                  unitMemShmem,
 		openFDs:                       openFDs,
 		maxFDs:                        maxFDs,
 		vsize:                         vsize,
@@ -288,7 +310,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 
 	// Collect metrics from cgroups
 	switch parseUnitType(unit) {
-	case "service", "mount","socket", "swap", "slice":
+	case "service", "mount", "socket", "swap", "slice":
 		cgroupPath, err := c.getControlGroup(conn, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
@@ -599,21 +621,25 @@ func (c *Collector) collectUnitMemMetrics(cgSubpath string, conn *dbus.Conn, ch 
 	// will have a memory.stat file, but systemd will still report MemoryAccounting=false for most units
 	memStat, err := cgroup.NewMemStat(cgSubpath)
 	if err != nil {
-		// Unable to open the file
 		if perr, ok := err.(*os.PathError); ok && perr.Op == "open" {
 			return nil
 		}
-
-		// if unitType == "Socket" {
-		//	log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
-	// 		return nil
-		// }
 		return errors.Wrapf(err, errControlGroupReadMsg, "Memory stat")
 	}
 
+	unitType := parseUnitType(unit)
 	ch <- prometheus.MustNewConstMetric(
 		c.unitMemCache, prometheus.GaugeValue,
-		float64(memStat.Cache), unit.Name, parseUnitType(unit))
+		float64(memStat.Cache), unit.Name, unitType)
+	ch <- prometheus.MustNewConstMetric(
+		c.unitMemRss, prometheus.GaugeValue,
+		float64(memStat.Rss), unit.Name, unitType)
+	ch <- prometheus.MustNewConstMetric(
+		c.unitMemDirty, prometheus.GaugeValue,
+		float64(memStat.Dirty), unit.Name, unitType)
+	ch <- prometheus.MustNewConstMetric(
+		c.unitMemShmem, prometheus.GaugeValue,
+		float64(memStat.Shmem), unit.Name, unitType)
 
 	return nil
 }

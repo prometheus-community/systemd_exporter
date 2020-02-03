@@ -3,6 +3,7 @@ package systemd
 import (
 	"fmt"
 	"math"
+	"os"
 
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
@@ -271,15 +272,15 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 
 	logger := c.logger.With("unit", unit.Name)
 
-	// Collect unit_state for all
+	// Collect unit_state for all unit types
 	err := c.collectUnitState(conn, ch, unit)
 	if err != nil {
 		logger.Warnf(errUnitMetricsMsg, err)
 		// TODO should we continue processing here?
 	}
 
-	switch {
-	case strings.HasSuffix(unit.Name, ".service"):
+	switch parseUnitType(unit) {
+	case "service":
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
@@ -314,7 +315,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-	case strings.HasSuffix(unit.Name, ".mount"):
+	case "mount":
 		err = c.collectMountMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
@@ -323,12 +324,12 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-	case strings.HasSuffix(unit.Name, ".timer"):
+	case "timer":
 		err := c.collectTimerTriggerTime(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-	case strings.HasSuffix(unit.Name, ".socket"):
+	case "socket":
 		err := c.collectSocketConnMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
@@ -339,13 +340,13 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-	case strings.HasSuffix(unit.Name, ".swap"):
 		err = c.collectUnitCPUUsageMetrics("Swap", conn, ch, unit)
+	case "swap":
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}
-	case strings.HasSuffix(unit.Name, ".slice"):
 		err = c.collectUnitCPUUsageMetrics("Slice", conn, ch, unit)
+	case "slice":
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
 		}

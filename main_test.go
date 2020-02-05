@@ -67,7 +67,7 @@ func runServerAndTest(args []string, url string, fn func() error) error {
 	fmt.Println("Waiting on test server startup...")
 	for i := 0; i < 10; i++ {
 		root := fmt.Sprintf("http://%s/", address)
-		if resp, err := getUrl(root); err == nil && resp.StatusCode == http.StatusOK {
+		if resp, err := getURL(root); err == nil && resp.StatusCode == http.StatusOK {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -98,10 +98,10 @@ func runServerAndTest(args []string, url string, fn func() error) error {
 }
 
 func getMetrics() (*http.Response, error) {
-	return getUrl(fmt.Sprintf("http://%s/metrics", address))
+	return getURL(fmt.Sprintf("http://%s/metrics", address))
 }
 
-func getUrl(url string) (*http.Response, error) {
+func getURL(url string) (*http.Response, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err

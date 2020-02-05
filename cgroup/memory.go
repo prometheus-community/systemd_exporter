@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
-// memory.stat file
+// MemStat represents the memory.stat file exported by the kernel when the memory cgroup controller is enabled.
+// See https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
 type MemStat struct {
 	// bytes of page cache memory
 	CacheBytes uint64
@@ -211,8 +211,7 @@ func NewMemStat(cgSubpath string) (MemStat, error) {
 	return fs.NewMemStat(cgSubpath)
 }
 
-// MemStat returns an information about cgroup memory statistics.
-// See
+// NewMemStat returns an information about cgroup memory statistics.
 func (fs FS) NewMemStat(cgSubpath string) (MemStat, error) {
 	cgPath, err := fs.cgGetPath("memory", cgSubpath, "memory.stat")
 	if err != nil {

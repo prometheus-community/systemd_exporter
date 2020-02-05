@@ -83,6 +83,10 @@ const (
 	// a.k.a. "unified hierarchy"
 	unifModeAll cgUnifiedMountMode = iota
 )
+func (c cgUnifiedMountMode) String() string {
+	return [...]string{"unknown", "none", "systemd", "all"}[c]
+}
+
 
 // Values copied from https://github.com/torvalds/linux/blob/master/include/uapi/linux/magic.h
 const (
@@ -99,31 +103,32 @@ const (
 // to track this
 // WARNING: We cache this data once at process start. Systemd updates
 // may require restarting systemd-exporter
-// Equivalent to systemd cgUnifiedCached method
+// Equivalent to systemd cgroup-util.c#cg_unified_cached
+var statfsFunc = unix.Statfs
 func cgUnifiedCached() (cgUnifiedMountMode, error) {
 	// if cgroupUnified != unifModeUnknown {
 	// 	return cgroupUnified, nil
 	// }
 
 	var fs unix.Statfs_t
-	err := unix.Statfs("/sys/fs/cgroup/", &fs)
+	err := statfsFunc("/sys/fs/cgroup/", &fs)
 	if err != nil {
-		return unifModeUnknown, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup)")
+		return unifModeUnknown, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup/)")
 	}
 
 	switch fs.Type {
 	case cgroup2SuperMagic:
-		log.Debugf("Found cgroup2 on /sys/fs/cgroup, full unified hierarchy")
+		log.Debugf("Found cgroup2 on /sys/fs/cgroup/, full unified hierarchy")
 		return unifModeAll, nil
 	case tmpFsMagic:
-		err := unix.Statfs("/sys/fs/cgroup/unified", &fs)
+		err := statfsFunc("/sys/fs/cgroup/unified/", &fs)
 
 		// Ignore err, we expect path to be missing on v232
 		if err == nil && fs.Type == cgroup2SuperMagic {
-			log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller")
+			log.Debugf("Found cgroup2 on /sys/fs/cgroup/unified, unified hierarchy for systemd controller")
 			return unifModeSystemd, nil
 		} else {
-			err := unix.Statfs("/sys/fs/cgroup/systemd", &fs)
+			err := statfsFunc("/sys/fs/cgroup/systemd/", &fs)
 			if err != nil {
 				return unifModeUnknown, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup/systemd)")
 			}

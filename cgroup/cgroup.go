@@ -127,22 +127,24 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 		if err == nil && fs.Type == cgroup2SuperMagic {
 			log.Debugf("Found cgroup2 on /sys/fs/cgroup/unified, unified hierarchy for systemd controller")
 			return unifModeSystemd, nil
-		} else {
-			err := statfsFunc("/sys/fs/cgroup/systemd/", &fs)
-			if err != nil {
-				return unifModeUnknown, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup/systemd)")
-			}
-			switch fs.Type {
-			case cgroup2SuperMagic:
-				log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)")
-				return unifModeSystemd, nil
-			case cgroupSuperMagic:
-				log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
-				return unifModeNone, nil
-			default:
-				return unifModeUnknown, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
-			}
 		}
+
+		err = statfsFunc("/sys/fs/cgroup/systemd/", &fs)
+		if err != nil {
+			return unifModeUnknown, errors.Wrapf(err, "failed statfs(/sys/fs/cgroup/systemd)")
+		}
+
+		switch fs.Type {
+		case cgroup2SuperMagic:
+			log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)")
+			return unifModeSystemd, nil
+		case cgroupSuperMagic:
+			log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
+			return unifModeNone, nil
+		default:
+			return unifModeUnknown, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
+		}
+
 	default:
 		return unifModeUnknown, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup)", fs.Type)
 	}

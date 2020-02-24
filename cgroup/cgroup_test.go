@@ -105,17 +105,17 @@ func TestCgUnifiedCached(t *testing.T) {
 	tables := []struct {
 		name         string
 		statFn       func(string,*unix.Statfs_t) error
-		expectedMode cgUnifiedMountMode
+		expectedMode MountMode
 		errExpected  bool
 	}{
-		{"NoCgroupMount", noCgroupMount, unifModeUnknown, true},
-		{"UnknownCgroupMountType", unknownCgroupMount, unifModeUnknown, true},
-		{"LegacyMount", legacyMount, unifModeNone, false},
-		{"HybridMount, v232", hybridMountSystemdV232, unifModeSystemd, false},
-		{"HybridMount, v233+", hybridMountSystemdV233, unifModeSystemd, false},
-		{"MissingSystemdFolder", missingSystemdFolder, unifModeUnknown, true},
-		{"UnknownSystemdFolderType", unknownSystemdFolderMountType, unifModeUnknown, true},
-		{"UnifiedMount", unifiedMount, unifModeAll, false},
+		{"NoCgroupMount", noCgroupMount, MountModeUnknown, true},
+		{"UnknownCgroupMountType", unknownCgroupMount, MountModeUnknown, true},
+		{"LegacyMount", legacyMount, MountModeLegacy, false},
+		{"HybridMount, v232", hybridMountSystemdV232, MountModeHybrid, false},
+		{"HybridMount, v233+", hybridMountSystemdV233, MountModeHybrid, false},
+		{"MissingSystemdFolder", missingSystemdFolder, MountModeUnknown, true},
+		{"UnknownSystemdFolderType", unknownSystemdFolderMountType, MountModeUnknown, true},
+		{"UnifiedMount", unifiedMount, MountModeUnified, false},
 	}
 
 	for _, table := range tables {
@@ -131,27 +131,24 @@ func TestCgUnifiedCached(t *testing.T) {
 			t.Errorf("%s: expected mode %s but got mode %s", table.name, table.expectedMode, mode)
 		}
 	}
-
-
-
 }
 
 func TestNewFS(t *testing.T) {
-	if _, err := newFS("foobar", unifModeUnknown); err == nil {
-		t.Error("newFS should have failed with non-existing path")
+	if _, err := NewFS("foobar", MountModeUnknown); err == nil {
+		t.Error("NewFS should have failed with non-existing path")
 	}
 
-	if _, err := newFS("cgroups_test.go", unifModeUnknown); err == nil {
-		t.Error("want newFS to fail if mount point is not a dir")
+	if _, err := NewFS("cgroups_test.go", MountModeUnknown); err == nil {
+		t.Error("want NewFS to fail if mount point is not a dir")
 	}
 
-	if _, err := newFS(testFixturesHybrid, unifModeUnknown); err != nil {
-		t.Error("want newFS to succeed if mount point exists")
+	if _, err := NewFS(testFixturesHybrid, MountModeUnknown); err != nil {
+		t.Error("want NewFS to succeed if mount point exists")
 	}
 }
 
 func getHybridFixtures(t *testing.T) FS {
-	fs, err := newFS(testFixturesHybrid, unifModeSystemd)
+	fs, err := NewFS(testFixturesHybrid, MountModeHybrid)
 	if err != nil {
 		t.Fatal("Unable to create hybrid text fixtures")
 	}
@@ -161,11 +158,11 @@ func getHybridFixtures(t *testing.T) FS {
 func TestCgSubpath(t *testing.T) {
 	fs := getHybridFixtures(t)
 
-	fs.cgroupUnified = unifModeUnknown
+	fs.cgroupUnified = MountModeUnknown
 	if _, err := fs.cgGetPath("cpu", "/system.slice", "cpuacct.usage_all"); err == nil {
 		t.Error("should not be able to determine path with unknown mount mode")
 	}
-	fs.cgroupUnified = unifModeSystemd
+	fs.cgroupUnified = MountModeHybrid
 	path, err := fs.cgGetPath("cpu", "/system.slice", "cpuacct.usage_all")
 	if err != nil {
 		t.Error("should be able to determine path with systemd mount mode")

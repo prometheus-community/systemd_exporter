@@ -3,6 +3,7 @@ package systemd
 import (
 	"fmt"
 	"math"
+
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
 	"regexp"
@@ -77,7 +78,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	// for all possible unit type variables (at least, the relatively static ones that we care
 	// about such as type, generated-vs-real-unit, etc). Cons: a) huge waste since all these labels
 	// have to be set to foo="" on non-relevant types. b) accidental overloading (e.g. we have type
-	// label, but it means something differnet for a service vs a mount. Right now it's impossible to
+	// label, but it means something different for a service vs a mount. Right now it's impossible to
 	// detangle that.
 	// Option 1) is we have service_info, mount_info, target_info, etc. Many more metrics, but far fewer
 	// wasted labels and little chance of semantic confusion. Our current codebase is not tuned for this,
@@ -257,7 +258,6 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-
 	logger := c.logger.With("unit", unit.Name)
 
 	// Collect unit_state for all
@@ -342,7 +342,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 }
 
 func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	//TODO: wrap GetUnitTypePropertyString(
+	// TODO: wrap GetUnitTypePropertyString(
 	// serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Timer", "NextElapseUSecMonotonic")
 
 	for _, stateName := range unitStatesName {
@@ -360,7 +360,7 @@ func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metri
 
 // TODO metric is named unit but function is "Mount"
 func (c *Collector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	//TODO: wrap GetUnitTypePropertyString(
+	// TODO: wrap GetUnitTypePropertyString(
 	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Mount", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
@@ -460,12 +460,12 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 	if err != nil {
 		return err
 	}
-	p, err := fs.NewProc(int(pid))
+	p, err := fs.Proc(int(pid))
 	if err != nil {
 		return err
 	}
 
-	stat, err := p.NewStat()
+	stat, err := p.Stat()
 	if err != nil {
 		return err
 	}
@@ -478,7 +478,7 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 	ch <- prometheus.MustNewConstMetric(c.rss, prometheus.GaugeValue,
 		float64(stat.ResidentMemory()), unit.Name)
 
-	limits, err := p.NewLimits()
+	limits, err := p.Limits()
 	if err != nil {
 		return errors.Wrap(err, "couldn't get process limits")
 	}
@@ -501,7 +501,6 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 
 func (c *Collector) mustGetUnitStringTypeProperty(unitType string,
 	propName string, defaultVal string, conn *dbus.Conn, unit dbus.UnitStatus) string {
-
 	prop, err := conn.GetUnitTypeProperty(unit.Name, unitType, propName)
 	if err != nil {
 		c.logger.Debugf(errGetPropertyMsg, propName)

@@ -7,7 +7,7 @@
    or mount unit types(`aufs`,`ext3`, etc). Service and mount types have been moved to `systemd_unit_info` 
 
 ### Changes
-
+- [CHANGE] Important! Docker images are now published to `povilasv/systemd-exporter` and `quay.io/povilasv/systemd-exporter` registry.
 - [FEATURE] Add support for amd64, 386, arm, arm64, mips, mipsle, mips64, mips64le, ppc64, ppc64le, s390x docker images.
 - [FEATURE] Read unit CPU usage from cgroup. Added `systemd_unit_cpu_seconds_total` metric. **Note** - Untested on unified hierarchy
 - [FEATURE] Add `systemd_unit_info` with metainformation about units incl. subtype specific info

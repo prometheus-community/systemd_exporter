@@ -9,26 +9,26 @@ executors:
   # also be updated.
   golang:
     docker:
-    - image: circleci/golang:1.13
+      - image: circleci/golang:1.13
 
 jobs:
   test:
     executor: golang
 
     steps:
-    - prometheus/setup_environment
-    - run: make
-    - prometheus/store_artifact:
-        file: systemd_exporter
+      - prometheus/setup_environment
+      - run: make
+      - prometheus/store_artifact:
+          file: systemd_exporter
 
   codespell:
     docker:
-    - image: circleci/python
+      - image: circleci/python
 
     steps:
-    - checkout
-    - run: sudo pip install codespell
-    - run: codespell --skip=".git,./vendor,ttar,go.mod,go.sum,*pem" -L uint,packages\',uptodate
+      - checkout
+      - run: sudo pip install codespell
+      - run: codespell --skip=".git,./vendor,ttar,go.mod,go.sum,*pem" -L uint,packages\',uptodate
 
   build:
     machine:
@@ -39,27 +39,27 @@ jobs:
       REPO_PATH: github.com/povilasv/systemd_exporter
 
     steps:
-    - checkout
-    - run: docker run --privileged linuxkit/binfmt:v0.7
-    - run: make promu
-    - run: promu crossbuild
-    - run: promu --config .promu.yml crossbuild
-    - persist_to_workspace:
-        root: .
-        paths:
-        - .build
-    - store_artifacts:
-        path: .build
-        destination: /build
-    - run:
-        command: |
-          if [ -n "$CIRCLE_TAG" ]; then
-            make docker DOCKER_IMAGE_TAG=$CIRCLE_TAG
-          else
-            make docker
-          fi
-    - run: docker images
-    - run: docker run --rm -t -v "$(pwd):/app" "${DOCKER_TEST_IMAGE_NAME}" -i "${REPO_PATH}" -T
+      - checkout
+      - run: docker run --privileged linuxkit/binfmt:v0.7
+      - run: make promu
+      - run: promu crossbuild
+      - run: promu --config .promu.yml crossbuild
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .build
+      - store_artifacts:
+          path: .build
+          destination: /build
+      - run:
+          command: |
+            if [ -n "$CIRCLE_TAG" ]; then
+              make docker DOCKER_IMAGE_TAG=$CIRCLE_TAG
+            else
+              make docker
+            fi
+      - run: docker images
+      - run: docker run --rm -t -v "$(pwd):/app" "${DOCKER_TEST_IMAGE_NAME}" -i "${REPO_PATH}" -T
 # - run:
 #    command: |
 #      if [ -n "$CIRCLE_TAG" ]; then
@@ -67,36 +67,81 @@ jobs:
 #      else
 #        make test-docker
 #      fi
+  publish_master:
+    docker:
+      - image: circleci/golang:1.13
+
+    steps:
+      - prometheus/setup_build_environment
+      - run: promu crossbuild tarballs
+      - run: promu checksum .tarballs
+      - run: promu release .tarballs
+      - store_artifacts:
+          path: .tarballs
+          destination: releases
+      - prometheus/publish_images:
+          registry: docker.io
+          organization: povilasv
+          login_variable: DOCKER_LOGIN
+          password_variable: DOCKER_PASSWORD
+      - prometheus/publish_images:
+          registry: quay.io
+          organization: povilasv
+          login_variable: QUAY_LOGIN
+          password_variable: QUAY_PASSWORD
+
+  publish_release:
+    docker:
+      - image: circleci/golang:1.13
+
+    steps:
+      - prometheus/setup_build_environment
+      - run: promu crossbuild tarballs
+      - run: promu checksum .tarballs
+      - run: promu release .tarballs
+      - store_artifacts:
+          path: .tarballs
+          destination: releases
+      - prometheus/publish_release_images:
+          registry: docker.io
+          organization: prom
+          login_variable: DOCKER_LOGIN
+          password_variable: DOCKER_PASSWORD
+      - prometheus/publish_release_images:
+          registry: quay.io
+          organization: prometheus
+          login_variable: QUAY_LOGIN
+          password_variable: QUAY_PASSWORD
 
 workflows:
   version: 2
   systemd_exporter:
     jobs:
-    - test:
-        filters:
-          tags:
-            only: /.*/
-    - build:
-        filters:
-          tags:
-            only: /.*/
-    - codespell:
-        filters:
-          tags:
-            only: /.*/
-    - prometheus/publish_master:
-        requires:
-        - test
-        - build
-        filters:
-          branches:
-            only: master
-    - prometheus/publish_release:
-        requires:
-        - test
-        - build
-        filters:
-          tags:
-            only: /^v.*/
-          branches:
-            ignore: /.*/
+      - test:
+          filters:
+            tags:
+              only: /.*/
+      - build:
+          filters:
+            tags:
+              only: /.*/
+      - codespell:
+          filters:
+            tags:
+              only: /.*/
+      - publish_master:
+          requires:
+            - test
+            - build
+          filters:
+            branches:
+              only: master
+      - publish_release:
+          requires:
+            - test
+            - build
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/

@@ -101,12 +101,12 @@ jobs:
           destination: releases
       - prometheus/publish_release_images:
           registry: docker.io
-          organization: prom
+          organization: povilasv
           login_variable: DOCKER_LOGIN
           password_variable: DOCKER_PASSWORD
       - prometheus/publish_release_images:
           registry: quay.io
-          organization: prometheus
+          organization: povilasv
           login_variable: QUAY_LOGIN
           password_variable: QUAY_PASSWORD
 

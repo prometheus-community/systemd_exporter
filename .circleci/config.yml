@@ -1,0 +1,104 @@
+---
+version: 2.1
+
+orbs:
+  prometheus: prometheus/prometheus@0.1.0
+
+executors:
+  # Whenever the Go version is updated here, .promu.yml should
+  # also be updated.
+  golang:
+    docker:
+    - image: circleci/golang:1.13
+
+jobs:
+  test:
+    executor: golang
+
+    steps:
+    - prometheus/setup_environment
+    - run: make
+    - prometheus/store_artifact:
+        file: systemd_exporter
+
+  codespell:
+    docker:
+    - image: circleci/python
+
+    steps:
+    - checkout
+    - run: sudo pip install codespell
+    - run: codespell --skip=".git,./vendor,ttar,go.mod,go.sum,*pem" -L uint,packages\',uptodate
+
+  build:
+    machine:
+      image: ubuntu-1604:201903-01
+
+    environment:
+      DOCKER_TEST_IMAGE_NAME: quay.io/prometheus/golang-builder:1.13-base
+      REPO_PATH: github.com/povilasv/systemd_exporter
+
+    steps:
+    - checkout
+    - run: docker run --privileged linuxkit/binfmt:v0.7
+    - run: make promu
+    - run: promu crossbuild
+    - run: promu --config .promu.yml crossbuild
+    - persist_to_workspace:
+        root: .
+        paths:
+        - .build
+    - store_artifacts:
+        path: .build
+        destination: /build
+    - run:
+        command: |
+          if [ -n "$CIRCLE_TAG" ]; then
+            make docker DOCKER_IMAGE_TAG=$CIRCLE_TAG
+          else
+            make docker
+          fi
+    - run: docker images
+    - run: docker run --rm -t -v "$(pwd):/app" "${DOCKER_TEST_IMAGE_NAME}" -i "${REPO_PATH}" -T
+# - run:
+#    command: |
+#      if [ -n "$CIRCLE_TAG" ]; then
+#        make test-docker DOCKER_IMAGE_TAG=$CIRCLE_TAG
+#      else
+#        make test-docker
+#      fi
+
+workflows:
+  version: 2
+  systemd_exporter:
+    jobs:
+    - test:
+        filters:
+          tags:
+            only: /.*/
+    - build:
+        filters:
+          tags:
+            only: /.*/
+    - codespell:
+        filters:
+          tags:
+            only: /.*/
+    - prometheus/publish_master:
+        context: org-context
+        requires:
+        - test
+        - build
+        filters:
+          branches:
+            only: master
+    - prometheus/publish_release:
+        context: org-context
+        requires:
+        - test
+        - build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/

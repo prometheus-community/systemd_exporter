@@ -1,6 +1,6 @@
 # Systemd exporter
 
-![build](https://travis-ci.com/povilasv/systemd_exporter.svg?branch=master)
+[![CircleCI](https://circleci.com/gh/prometheus/systemd_exporter/tree/master.svg?style=shield)][circleci]
 [![Go Report Card](https://goreportcard.com/badge/github.com/povilasv/systemd_exporter)](https://goreportcard.com/report/github.com/povilasv/systemd_exporter)
 [![Docker Repository on Quay](https://quay.io/repository/povilasv/systemd_exporter/status "Docker Repository on Quay")](https://quay.io/repository/povilasv/systemd_exporter)
 [![Docker Pulls](https://img.shields.io/docker/pulls/povilasv/systemd_exporter.svg?maxAge=604800)](https://hub.docker.com/r/povilasv/systemd_exporter)
@@ -63,7 +63,7 @@ Take a look at `examples` for daemonset manifests for Kubernetes.
 
 # User privilleges
 
-User need to access systemd dbus, `/proc`, `/sys/fs/cgroup` for exporter to work.
+User needs to access systemd dbus, typically exporter needs to see node's `/proc`, `/sys/fs/cgroup` to work.
 
 # Metrics
 

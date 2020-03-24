@@ -34,7 +34,7 @@ const (
 	// unified hierarchy. a.k.a "legacy hierarchy"
 	unifModeNone cgUnifiedMountMode = iota
 	// unifModeSystemd indicates that systemd is using a v2 unified
-	// hierarcy for organizing processes into control groups, but all
+	// hierarchy for organizing processes into control groups, but all
 	// controller interaction is using v1 per-controller hierarchies.
 	// a.k.a. "hybrid hierarchy"
 	unifModeSystemd cgUnifiedMountMode = iota

@@ -1,5 +1,7 @@
 ## master / unreleased
 
+## 0.3.0 / 2020-03-28
+
 ### **Breaking changes**
 
 * `systemd_unit_state` label `type` has new meaning

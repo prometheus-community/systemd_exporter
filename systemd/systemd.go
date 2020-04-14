@@ -25,6 +25,7 @@ var (
 	unitWhitelist         = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
 	unitBlacklist         = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(device)").String()
 	systemdPrivate        = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	systemdUser           = kingpin.Flag("collector.user", "Connect to the user systemd instance.").Bool()
 	procPath              = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
 	enableRestartsMetrics = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableFDMetrics       = kingpin.Flag("collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
@@ -667,6 +668,9 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 func (c *Collector) newDbus() (*dbus.Conn, error) {
 	if *systemdPrivate {
 		return dbus.NewSystemdConnection()
+	}
+	if *systemdUser {
+		return dbus.NewUserConnection()
 	}
 	return dbus.New()
 }

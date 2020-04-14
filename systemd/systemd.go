@@ -22,13 +22,14 @@ import (
 const namespace = "systemd"
 
 var (
-	unitWhitelist         = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
-	unitBlacklist         = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(device)").String()
-	systemdPrivate        = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
-	systemdUser           = kingpin.Flag("collector.user", "Connect to the user systemd instance.").Bool()
-	procPath              = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
-	enableRestartsMetrics = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
-	enableFDMetrics       = kingpin.Flag("collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
+	unitWhitelist             = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
+	unitBlacklist             = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(device)").String()
+	systemdPrivate            = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	systemdUser               = kingpin.Flag("collector.user", "Connect to the user systemd instance.").Bool()
+	procPath                  = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
+	enableRestartsMetrics     = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
+	enableFDMetrics           = kingpin.Flag("collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
+	enableIPAccountingMetrics = kingpin.Flag("collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -62,6 +63,10 @@ type Collector struct {
 	vsize                         *prometheus.Desc
 	maxVsize                      *prometheus.Desc
 	rss                           *prometheus.Desc
+	ipIngressBytes                *prometheus.Desc
+	ipEgressBytes                 *prometheus.Desc
+	ipIngressPackets              *prometheus.Desc
+	ipEgressPackets               *prometheus.Desc
 
 	unitWhitelistPattern *regexp.Regexp
 	unitBlacklistPattern *regexp.Regexp
@@ -164,6 +169,27 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		"Resident memory size in bytes.",
 		[]string{"name"}, nil,
 	)
+
+	ipIngressBytes := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
+		"Service unit ingress IP accounting in bytes.",
+		[]string{"name"}, nil,
+	)
+	ipEgressBytes := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes"),
+		"Service unit egress IP accounting in bytes.",
+		[]string{"name"}, nil,
+	)
+	ipIngressPackets := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets"),
+		"Service unit ingress IP accounting in packets.",
+		[]string{"name"}, nil,
+	)
+	ipEgressPackets := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "service_ip_egress_packets"),
+		"Service unit egress IP accounting in packets.",
+		[]string{"name"}, nil,
+	)
 	unitWhitelistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitWhitelist))
 	unitBlacklistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitBlacklist))
 
@@ -186,6 +212,10 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		vsize:                         vsize,
 		maxVsize:                      maxVsize,
 		rss:                           rss,
+		ipIngressBytes:                ipIngressBytes,
+		ipEgressBytes:                 ipEgressBytes,
+		ipIngressPackets:              ipIngressPackets,
+		ipEgressPackets:               ipEgressPackets,
 		unitWhitelistPattern:          unitWhitelistPattern,
 		unitBlacklistPattern:          unitBlacklistPattern,
 	}, nil
@@ -217,6 +247,7 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.vsize
 	desc <- c.maxVsize
 	desc <- c.rss
+	desc <- c.ipIngressBytes
 }
 
 func parseUnitType(unit dbus.UnitStatus) string {
@@ -299,6 +330,13 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
 		if err != nil {
 			logger.Warnf(errUnitMetricsMsg, err)
+		}
+
+		if *enableIPAccountingMetrics {
+			err = c.collectIPAccountingMetrics(conn, ch, unit)
+			if err != nil {
+				logger.Warnf(errUnitMetricsMsg, err)
+			}
 		}
 	case strings.HasSuffix(unit.Name, ".mount"):
 		err = c.collectMountMetainfo(conn, ch, unit)
@@ -607,6 +645,32 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 	ch <- prometheus.MustNewConstMetric(
 		c.socketRefusedConnectionsDesc, prometheus.GaugeValue,
 		float64(refusedConnectionCount.Value.Value().(uint32)), unit.Name)
+
+	return nil
+}
+
+func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	unitPropertyToPromDesc := map[string]*prometheus.Desc{
+		"IPIngressBytes":   c.ipIngressBytes,
+		"IPEgressBytes":    c.ipEgressBytes,
+		"IPIngressPackets": c.ipIngressPackets,
+		"IPEgressPackets":  c.ipEgressPackets,
+	}
+
+	for propertyName, desc := range unitPropertyToPromDesc {
+		b, err := conn.GetUnitTypeProperty(unit.Name, "Service", propertyName)
+		if err != nil {
+			return errors.Wrapf(err, errGetPropertyMsg, propertyName)
+		}
+
+		ipBytes, ok := b.Value.Value().(uint64)
+		if !ok {
+			return errors.Errorf(errConvertUint64PropertyMsg, propertyName, b.Value.Value())
+		}
+
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
+			float64(ipBytes), unit.Name)
+	}
 
 	return nil
 }

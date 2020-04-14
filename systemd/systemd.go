@@ -248,6 +248,10 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.maxVsize
 	desc <- c.rss
 	desc <- c.ipIngressBytes
+	desc <- c.ipEgressBytes
+	desc <- c.ipIngressPackets
+	desc <- c.ipEgressPackets
+
 }
 
 func parseUnitType(unit dbus.UnitStatus) string {

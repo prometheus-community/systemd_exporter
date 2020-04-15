@@ -171,22 +171,22 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	)
 
 	ipIngressBytes := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
+		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes_total"),
 		"Service unit ingress IP accounting in bytes.",
 		[]string{"name"}, nil,
 	)
 	ipEgressBytes := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes"),
+		prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes_total"),
 		"Service unit egress IP accounting in bytes.",
 		[]string{"name"}, nil,
 	)
 	ipIngressPackets := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets"),
+		prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets_total"),
 		"Service unit ingress IP accounting in packets.",
 		[]string{"name"}, nil,
 	)
 	ipEgressPackets := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_egress_packets"),
+		prometheus.BuildFQName(namespace, "", "service_ip_egress_packets_total"),
 		"Service unit egress IP accounting in packets.",
 		[]string{"name"}, nil,
 	)

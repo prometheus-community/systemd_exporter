@@ -662,18 +662,18 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 	}
 
 	for propertyName, desc := range unitPropertyToPromDesc {
-		b, err := conn.GetUnitTypeProperty(unit.Name, "Service", propertyName)
+		property, err := conn.GetUnitTypeProperty(unit.Name, "Service", propertyName)
 		if err != nil {
 			return errors.Wrapf(err, errGetPropertyMsg, propertyName)
 		}
 
-		ipBytes, ok := b.Value.Value().(uint64)
+		counter, ok := property.Value.Value().(uint64)
 		if !ok {
-			return errors.Errorf(errConvertUint64PropertyMsg, propertyName, b.Value.Value())
+			return errors.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
 		}
 
 		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
-			float64(ipBytes), unit.Name)
+			float64(counter), unit.Name)
 	}
 
 	return nil

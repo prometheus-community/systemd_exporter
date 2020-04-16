@@ -54,6 +54,7 @@ Name     | Description |
 ---------|-------------|
 --collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
 --collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
+--collector.enable-ip-accounting | Enables service ip accounting metrics. This feature only works with systemd 235 and above.
 
 Of note, there is no customized support for `.snapshot` (removed in systemd v228), `.busname` (only present on systems using kdbus), `generated` (created via generators), `transient` (created during systemd-run) have no special support. 
 
@@ -85,6 +86,10 @@ Note that a number of unit types are filtered by default
 | systemd_unit_tasks_max                    | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_unit_start_time_seconds           | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_service_restart_total             | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_ingress_bytes          | Counter     | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_egress_bytes           | Counter     | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_ingress_packets_total  | Counter     | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_egress_packets_total   | Counter     | UNSTABLE | 1 per service                                                      |
 | systemd_socket_accepted_connections_total | Counter     | UNSTABLE | 1 per socket                                                       |
 | systemd_socket_current_connections        | Gauge       | UNSTABLE | 1 per socket                                                       |
 | systemd_socket_refused_connections_total  | Gauge       | UNSTABLE | 1 per socket                                                       |

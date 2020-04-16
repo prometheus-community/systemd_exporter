@@ -86,8 +86,8 @@ Note that a number of unit types are filtered by default
 | systemd_unit_tasks_max                    | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_unit_start_time_seconds           | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_service_restart_total             | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_service_ip_ingress_bytes_total    | Counter     | UNSTABLE | 1 per service                                                      |
-| systemd_service_ip_egress_bytes_total     | Counter     | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_ingress_bytes          | Counter     | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_egress_bytes           | Counter     | UNSTABLE | 1 per service                                                      |
 | systemd_service_ip_ingress_packets_total  | Counter     | UNSTABLE | 1 per service                                                      |
 | systemd_service_ip_egress_packets_total   | Counter     | UNSTABLE | 1 per service                                                      |
 | systemd_socket_accepted_connections_total | Counter     | UNSTABLE | 1 per socket                                                       |

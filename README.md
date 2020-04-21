@@ -100,3 +100,13 @@ Note that a number of unit types are filtered by default
 | systemd_process_open_fds                  | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_process_max_fds                   | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_process_cpu_seconds_total         | Counter     | UNSTABLE | 1 per service                                                      |
+
+## Configuration
+
+systemd_exporter allows you to include/exclude some systemd units. You can use `--collector.unit-whitelist` and `--collector.unit-blacklist` to select wanted units. Both of these options are in [RE2](https://github.com/google/re2/wiki/Syntax) syntax. For example:
+
+```
+args:
+  - --collector.unit-whitelist=.*ceph.*\.service|ceph.*\.timer|kubelet.service|docker.service
+  - --collector.unit-blacklist=ceph-volume.*\.service
+```

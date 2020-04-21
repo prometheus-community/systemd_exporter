@@ -1,5 +1,10 @@
 ## master / unreleased
 
+## 0.4.0 / 2020-04-23
+
+* New option `--collector.user`, which allows users to connect to the user systemd instance. Thanks @pelov :)
+* New feature `--collector.enable-ip-accounting`, enables service ip accounting metrics. This feature only works with systemd 235 and above. thanks @jwhited :)
+
 ## 0.3.0 / 2020-03-28
 
 ### **Breaking changes**

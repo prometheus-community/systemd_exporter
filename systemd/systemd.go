@@ -113,7 +113,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	)
 	nRestartsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_restart_total"),
-		"Service unit count of Restart triggers", []string{"state"}, nil)
+		"Service unit count of Restart triggers", []string{"name"}, nil)
 	timerLastTriggerDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "timer_last_trigger_seconds"),
 		"Seconds since epoch of last trigger.", []string{"name"}, nil)

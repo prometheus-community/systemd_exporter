@@ -4,7 +4,6 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
-	"github.com/povilasv/prommod"
 	"github.com/povilasv/systemd_exporter/systemd"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -34,7 +33,7 @@ func main() {
 	)
 
 	log.AddFlags(kingpin.CommandLine)
-	kingpin.Version(prommod.Print(version.Print("systemd_exporter")))
+	kingpin.Version(version.Print("systemd_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
@@ -45,7 +44,6 @@ func main() {
 	r := prometheus.NewRegistry()
 
 	r.MustRegister(version.NewCollector("systemd_exporter"))
-	r.MustRegister(prommod.NewCollector("systemd_exporter"))
 
 	collector, err := systemd.NewCollector(log.Base())
 	if err != nil {

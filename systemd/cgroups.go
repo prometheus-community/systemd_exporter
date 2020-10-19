@@ -97,7 +97,7 @@ func cgUnifiedCached(logger log.Logger) (cgUnifiedMountMode, error) {
 
 		// Ignore err, we expect path to be missing on v232
 		if err == nil && fs.Type == cgroup2SuperMagic {
-			level.Debug(logger).Log("msg", "Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller")
+			level.Debug(logger).Log("msg", "Found cgroup2 on /sys/fs/cgroup/unified, unified hierarchy for systemd controller")
 			cgroupUnified = unifModeSystemd
 		} else {
 			err := unix.Statfs("/sys/fs/cgroup/systemd", &fs)
@@ -140,8 +140,10 @@ func cgGetPath(controller string, subpath string, suffix string, logger log.Logg
 
 	joined := ""
 	switch unified {
-	case unifModeNone, unifModeSystemd:
+	case unifModeNone:
 		joined = filepath.Join("/sys/fs/cgroup", dn, subpath, suffix)
+	case unifModeSystemd:
+		joined = filepath.Join("/sys/fs/cgroup/unified", subpath, suffix)
 	case unifModeAll:
 		joined = filepath.Join("/sys/fs/cgroup", subpath, suffix)
 	default:
@@ -154,45 +156,8 @@ func cgGetPath(controller string, subpath string, suffix string, logger log.Logg
 // (aka cgroup) of tasks (e.g. both processes and threads).
 // Equivalent to cpuacct.usage_percpu_user and cpuacct.usage_percpu_system
 type CPUUsage struct {
-	CPUId         uint32
-	SystemNanosec uint64
-	UserNanosec   uint64
-}
-
-// CPUAcct stores CPU accounting information (e.g. cpu usage) for a control
-// group (cgroup) of tasks. Equivalent to cpuacct.usage_all
-type CPUAcct struct {
-	CPUs []CPUUsage
-}
-
-// UsageUserNanosecs returns user (e.g. non-kernel) cpu consumption in nanoseconds, across all available cpu
-// cores, from the point that CPU accounting was enabled for this control group.
-func (c *CPUAcct) UsageUserNanosecs() uint64 {
-	var nanoseconds uint64
-	for _, cpu := range c.CPUs {
-		nanoseconds += cpu.UserNanosec
-	}
-	return nanoseconds
-}
-
-// UsageSystemNanosecs returns system (e.g. kernel) cpu consumption in nanoseconds, across all available cpu
-// cores, from the point that CPU accounting was enabled for this control group.
-func (c *CPUAcct) UsageSystemNanosecs() uint64 {
-	var nanoseconds uint64
-	for _, cpu := range c.CPUs {
-		nanoseconds += cpu.SystemNanosec
-	}
-	return nanoseconds
-}
-
-// UsageAllNanosecs returns total cpu consumption in nanoseconds, across all available cpu
-// cores, from the point that CPU accounting was enabled for this control group.
-func (c *CPUAcct) UsageAllNanosecs() uint64 {
-	var nanoseconds uint64
-	for _, cpu := range c.CPUs {
-		nanoseconds += cpu.SystemNanosec + cpu.UserNanosec
-	}
-	return nanoseconds
+	SystemMicrosec uint64
+	UserMicrosec   uint64
 }
 
 // ReadFileNoStat uses io.ReadAll to read contents of entire file.
@@ -214,20 +179,18 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
-// NewCPUAcct will locate and read the kernel's cpu accounting info for
+// NewCPUUsage will locate and read the kernel's cpu accounting info for
 // the provided systemd cgroup subpath.
-func NewCPUAcct(cgSubpath string, logger log.Logger) (*CPUAcct, error) {
-	var cpuUsage CPUAcct
-
-	cgPath, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all", logger)
+func NewCPUUsage(cgSubpath string, logger log.Logger) (*CPUUsage, error) {
+	cgPath, err := cgGetPath("cpu", cgSubpath, "cpu.stat", logger)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to get cpu controller path")
 	}
 
-	// Example cpuacct.usage_all
-	// cpu user system
-	// 0 21165924 0
-	// 1 13334251 0
+	// Example cpu.stat
+	// usage_usec 291912970
+	// user_usec 238552676
+	// system_usec 53360293
 	b, err := ReadFileNoStat(cgPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to read file %s", cgPath)
@@ -240,37 +203,34 @@ func NewCPUAcct(cgSubpath string, logger log.Logger) (*CPUAcct, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, errors.Wrapf(err, "unable to scan file %s", cgPath)
 	}
+	var user, sys uint64
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return nil, errors.Wrapf(err, "unable to scan file %s", cgPath)
 		}
 		text := scanner.Text()
 		vals := strings.Split(text, " ")
-		if len(vals) != 3 {
+		if len(vals) != 2 {
 			return nil, errors.Errorf("unable to parse contents of file %s", cgPath)
 		}
-		cpu, err := strconv.ParseUint(vals[0], 10, 32)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to parse %s as uint32 (from %s)", vals[0], cgPath)
-		}
-		user, err := strconv.ParseUint(vals[1], 10, 64)
+		val, err := strconv.ParseUint(vals[1], 10, 64)
 		if err != nil {
 			return nil, errors.Wrapf(err, "unable to parse %s as uint64 (from %s)", vals[1], cgPath)
 		}
-		sys, err := strconv.ParseUint(vals[2], 10, 64)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to parse %s as an in (from %s)", vals[2], cgPath)
+		if vals[0] == "user_usec" {
+			user = val
 		}
-		onecpu := CPUUsage{
-			CPUId:         uint32(cpu),
-			UserNanosec:   user,
-			SystemNanosec: sys,
+		if vals[0] == "system_usec" {
+			sys = val
 		}
-		cpuUsage.CPUs = append(cpuUsage.CPUs, onecpu)
 	}
-	if len(cpuUsage.CPUs) < 1 {
-		return nil, errors.Errorf("no CPU/core info extracted from %s", cgPath)
+	if user == 0 && sys == 0 {
+		return nil, nil
+	}
+	onecpu := CPUUsage{
+		UserMicrosec:   user,
+		SystemMicrosec: sys,
 	}
 
-	return &cpuUsage, nil
+	return &onecpu, nil
 }

@@ -1,5 +1,7 @@
 ## main / unreleased
 
+* read cpu statistics from the cpu controller instead of the cpuacct controller
+
 ## 0.5.0 / 2022-07-20
 
 Now released under the Prometheus Community

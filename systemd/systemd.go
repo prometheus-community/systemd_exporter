@@ -544,10 +544,8 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		// we have nothing to record
 		return nil
 	case cgSubpath == "" && unit.ActiveState == "active":
-		// Unexpected. Why is there no cgroup on an active unit?
-		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
-		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		return errors.Errorf("got 'no cgroup' from systemd for active unit (state=%s subtype=%s slice=%s)", unit.ActiveState, subType, slice)
+		// Some active units don't have a path, e.g. subtype=oneshot .mount or .swap
+		return nil
 	case cgSubpath == "":
 		// We are likely reading a unit that is currently changing state, so
 		// we record this and bail
@@ -555,38 +553,30 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
 		level.Debug(c.logger).Log("msg", "Read 'no cgroup' from unit", "unit", unit.Name, "state", unit.ActiveState, "subtype", subType, "slice", slice)
 		return nil
-	}
-
-	propCPUAcct, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "CPUAccounting")
-	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "CPUAccounting")
-	}
-	cpuAcct, ok := propCPUAcct.Value.Value().(bool)
-	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "CPUAccounting", propCPUAcct.Value.Value())
-	}
-	if !cpuAcct {
+	case cgSubpath == "/":
+		// No cpu stats for the root slice
 		return nil
 	}
 
-	cpuUsage, err := NewCPUAcct(cgSubpath, c.logger)
+	cpuUsage, err := NewCPUUsage(cgSubpath, c.logger)
 	if err != nil {
 		if unitType == "Socket" {
-			level.Debug(c.logger).Log("msg", "unable to read SocketUnit CPU accounting information", "unit", unit.Name)
 			return nil
 		}
 		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
 	}
 
-	userSeconds := float64(cpuUsage.UsageUserNanosecs()) / 1000000000.0
-	sysSeconds := float64(cpuUsage.UsageSystemNanosecs()) / 1000000000.0
+	if cpuUsage != nil {
+		userSeconds := float64(cpuUsage.UserMicrosec) / 1000000.0
+		sysSeconds := float64(cpuUsage.SystemMicrosec) / 1000000.0
 
-	ch <- prometheus.MustNewConstMetric(
-		c.unitCPUTotal, prometheus.CounterValue,
-		userSeconds, unit.Name, parseUnitType(unit), "user")
-	ch <- prometheus.MustNewConstMetric(
-		c.unitCPUTotal, prometheus.CounterValue,
-		sysSeconds, unit.Name, parseUnitType(unit), "system")
+		ch <- prometheus.MustNewConstMetric(
+			c.unitCPUTotal, prometheus.CounterValue,
+			userSeconds, unit.Name, parseUnitType(unit), "user")
+		ch <- prometheus.MustNewConstMetric(
+			c.unitCPUTotal, prometheus.CounterValue,
+			sysSeconds, unit.Name, parseUnitType(unit), "system")
+	}
 
 	return nil
 }

@@ -25,9 +25,10 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/dbus"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/log"
 	"github.com/prometheus/procfs"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
@@ -238,7 +239,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	err := c.collect(ch)
 	if err != nil {
-		c.logger.Error(err)
+		level.Error(c.logger).Log("msg", "error collecting metrics", "err", err)
 	}
 }
 
@@ -285,10 +286,10 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return errors.Wrap(err, "could not get list of systemd units from dbus")
 	}
 
-	c.logger.Debugf("systemd ListUnits took %f", time.Since(begin).Seconds())
+	level.Debug(c.logger).Log("msg", "systemd ListUnits took", "seconds", time.Since(begin).Seconds())
 	begin = time.Now()
-	units := filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
-	c.logger.Debugf("systemd filterUnits took %f", time.Since(begin).Seconds())
+	units := c.filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
+	level.Debug(c.logger).Log("msg", "systemd filterUnits took", "seconds", time.Since(begin).Seconds())
 
 	var wg sync.WaitGroup
 	wg.Add(len(units))
@@ -296,7 +297,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		go func(unit dbus.UnitStatus) {
 			err := c.collectUnit(conn, ch, unit)
 			if err != nil {
-				c.logger.Warnf(errUnitMetricsMsg, err)
+				level.Warn(c.logger).Log("msg", errUnitMetricsMsg, "err", err)
 			}
 			wg.Done()
 		}(unit)
@@ -307,12 +308,12 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	logger := c.logger.With("unit", unit.Name)
+	logger := log.With(c.logger, "unit", unit.Name)
 
 	// Collect unit_state for all
 	err := c.collectUnitState(conn, ch, unit)
 	if err != nil {
-		logger.Warnf(errUnitMetricsMsg, err)
+		level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		// TODO should we continue processing here?
 	}
 
@@ -320,78 +321,78 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 	case strings.HasSuffix(unit.Name, ".service"):
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 
 		err = c.collectServiceStartTimeMetrics(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 
 		if *enableRestartsMetrics {
 			err = c.collectServiceRestartCount(conn, ch, unit)
 			if err != nil {
-				logger.Warnf(errUnitMetricsMsg, err)
+				level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 			}
 		}
 
 		err = c.collectServiceTasksMetrics(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 
 		err = c.collectServiceProcessMetrics(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 		err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 
 		if *enableIPAccountingMetrics {
 			err = c.collectIPAccountingMetrics(conn, ch, unit)
 			if err != nil {
-				logger.Warnf(errUnitMetricsMsg, err)
+				level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 			}
 		}
 	case strings.HasSuffix(unit.Name, ".mount"):
 		err = c.collectMountMetainfo(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 		err = c.collectUnitCPUUsageMetrics("Mount", conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 	case strings.HasSuffix(unit.Name, ".timer"):
 		err := c.collectTimerTriggerTime(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 	case strings.HasSuffix(unit.Name, ".socket"):
 		err := c.collectSocketConnMetrics(conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 		// Most sockets do not have a cpu cgroupfs entry, but a
 		// few do, notably docker.socket
 		err = c.collectUnitCPUUsageMetrics("Socket", conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 	case strings.HasSuffix(unit.Name, ".swap"):
 		err = c.collectUnitCPUUsageMetrics("Swap", conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 	case strings.HasSuffix(unit.Name, ".slice"):
 		err = c.collectUnitCPUUsageMetrics("Slice", conn, ch, unit)
 		if err != nil {
-			logger.Warnf(errUnitMetricsMsg, err)
+			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 	default:
-		c.logger.Debugf(infoUnitNoHandler, unit.Name)
+		level.Debug(c.logger).Log("msg", infoUnitNoHandler, unit.Name)
 	}
 
 	return nil
@@ -559,12 +560,12 @@ func (c *Collector) mustGetUnitStringTypeProperty(unitType string,
 	propName string, defaultVal string, conn *dbus.Conn, unit dbus.UnitStatus) string {
 	prop, err := conn.GetUnitTypeProperty(unit.Name, unitType, propName)
 	if err != nil {
-		c.logger.Debugf(errGetPropertyMsg, propName)
+		level.Debug(c.logger).Log("msg", errGetPropertyMsg, "prop_name", propName)
 		return defaultVal
 	}
 	propVal, ok := prop.Value.Value().(string)
 	if !ok {
-		c.logger.Debugf(errConvertStringPropertyMsg, propName, prop.Value.Value())
+		level.Debug(c.logger).Log("msg", errConvertStringPropertyMsg, "prop_name", propName, "prop_value", prop.Value.Value())
 		return defaultVal
 	}
 	return propVal
@@ -598,7 +599,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		// we record this and bail
 		subType := c.mustGetUnitStringTypeProperty(unitType, "Type", "unknown", conn, unit)
 		slice := c.mustGetUnitStringTypeProperty(unitType, "Slice", "unknown", conn, unit)
-		log.Debugf("Read 'no cgroup' from unit (name=%s state=%s subtype=%s slice=%s) ", unit.Name, unit.ActiveState, subType, slice)
+		level.Debug(c.logger).Log("msg", "Read 'no cgroup' from unit", "unit", unit.Name, "state", unit.ActiveState, "subtype", subType, "slice", slice)
 		return nil
 	}
 
@@ -614,10 +615,10 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return nil
 	}
 
-	cpuUsage, err := NewCPUAcct(cgSubpath)
+	cpuUsage, err := NewCPUAcct(cgSubpath, c.logger)
 	if err != nil {
 		if unitType == "Socket" {
-			log.Debugf("unable to read SocketUnit CPU accounting information (unit=%s)", unit.Name)
+			level.Debug(c.logger).Log("msg", "unable to read SocketUnit CPU accounting information", "unit", unit.Name)
 			return nil
 		}
 		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
@@ -756,17 +757,17 @@ func (c *Collector) newDbus() (*dbus.Conn, error) {
 	return dbus.New()
 }
 
-func filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *regexp.Regexp) []dbus.UnitStatus {
+func (c *Collector) filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *regexp.Regexp) []dbus.UnitStatus {
 	filtered := make([]dbus.UnitStatus, 0, len(units))
 	for _, unit := range units {
 		if whitelistPattern.MatchString(unit.Name) &&
 			!blacklistPattern.MatchString(unit.Name) &&
 			unit.LoadState == "loaded" {
 
-			log.Debugf("Adding unit: %s", unit.Name)
+			level.Debug(c.logger).Log("msg", "Adding unit", "unit", unit.Name)
 			filtered = append(filtered, unit)
 		} else {
-			log.Debugf("Ignoring unit: %s", unit.Name)
+			level.Debug(c.logger).Log("msg", "Ignoring unit", "unit", unit.Name)
 		}
 	}
 

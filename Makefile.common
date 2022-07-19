@@ -1,3 +1,27 @@
+# Copyright 2018 The Prometheus Authors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# A common Makefile that includes rules to be reused in different prometheus projects.
+# !!! Open PRs only against the prometheus/prometheus/Makefile.common repository!
+
+# Example usage :
+# Create the main Makefile in the root project directory.
+# include Makefile.common
+# customTarget:
+# 	@echo ">> Running customTarget"
+#
+
 # Ensure GOBIN is not set during build so that promu is installed to the correct path
 unexport GOBIN
 
@@ -45,17 +69,32 @@ else
 	GO_BUILD_PLATFORM ?= $(GOHOSTOS)-$(GOHOSTARCH)
 endif
 
-PROMU_VERSION ?= 0.5.0
+GOTEST := $(GO) test
+GOTEST_DIR :=
+ifneq ($(CIRCLE_JOB),)
+ifneq ($(shell which gotestsum),)
+	GOTEST_DIR := test-results
+	GOTEST := gotestsum --junitfile $(GOTEST_DIR)/unit-tests.xml --
+endif
+endif
+
+PROMU_VERSION ?= 0.13.0
 PROMU_URL     := https://github.com/prometheus/promu/releases/download/v$(PROMU_VERSION)/promu-$(PROMU_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 
 GOLANGCI_LINT :=
 GOLANGCI_LINT_OPTS ?=
-GOLANGCI_LINT_VERSION ?= v1.18.0
+GOLANGCI_LINT_VERSION ?= v1.45.2
 # golangci-lint only supports linux, darwin and windows platforms on i386/amd64.
 # windows isn't included here because of the path separator being different.
 ifeq ($(GOHOSTOS),$(filter $(GOHOSTOS),linux darwin))
 	ifeq ($(GOHOSTARCH),$(filter $(GOHOSTARCH),amd64 i386))
-		GOLANGCI_LINT := $(FIRST_GOPATH)/bin/golangci-lint
+		# If we're in CI and there is an Actions file, that means the linter
+		# is being run in Actions, so we don't need to run it here.
+		ifeq (,$(CIRCLE_JOB))
+			GOLANGCI_LINT := $(FIRST_GOPATH)/bin/golangci-lint
+		else ifeq (,$(wildcard .github/workflows/golangci-lint.yml))
+			GOLANGCI_LINT := $(FIRST_GOPATH)/bin/golangci-lint
+		endif
 	endif
 endif
 
@@ -64,7 +103,7 @@ BIN_DIR                 ?= $(shell pwd)
 DOCKER_IMAGE_TAG        ?= $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
 DOCKERFILE_PATH         ?= ./Dockerfile
 DOCKERBUILD_CONTEXT     ?= ./
-DOCKER_REPO             ?= povilasv
+DOCKER_REPO             ?= prom
 
 DOCKER_ARCHS            ?= amd64
 
@@ -85,7 +124,7 @@ endif
 %: common-% ;
 
 .PHONY: common-all
-common-all: precheck style lint unused build test
+common-all: precheck style check_license lint yamllint unused build test
 
 .PHONY: common-style
 common-style:
@@ -97,6 +136,17 @@ common-style:
 		exit 1; \
 	fi
 
+.PHONY: common-check_license
+common-check_license:
+	@echo ">> checking license header"
+	@licRes=$$(for file in $$(find . -type f -iname '*.go' ! -path './vendor/*') ; do \
+               awk 'NR<=3' $$file | grep -Eq "(Copyright|generated|GENERATED)" || echo $$file; \
+       done); \
+       if [ -n "$${licRes}" ]; then \
+               echo "license header checking failed:"; echo "$${licRes}"; \
+               exit 1; \
+       fi
+
 .PHONY: common-deps
 common-deps:
 	@echo ">> getting dependencies"
@@ -106,15 +156,29 @@ else
 	$(GO) get $(GOOPTS) -t ./...
 endif
 
+.PHONY: update-go-deps
+update-go-deps:
+	@echo ">> updating Go dependencies"
+	@for m in $$($(GO) list -mod=readonly -m -f '{{ if and (not .Indirect) (not .Main)}}{{.Path}}{{end}}' all); do \
+		$(GO) get -d $$m; \
+	done
+	GO111MODULE=$(GO111MODULE) $(GO) mod tidy
+ifneq (,$(wildcard vendor))
+	GO111MODULE=$(GO111MODULE) $(GO) mod vendor
+endif
+
 .PHONY: common-test-short
-common-test-short:
+common-test-short: $(GOTEST_DIR)
 	@echo ">> running short tests"
-	GO111MODULE=$(GO111MODULE) $(GO) test -short $(GOOPTS) $(pkgs)
+	GO111MODULE=$(GO111MODULE) $(GOTEST) -short $(GOOPTS) $(pkgs)
 
 .PHONY: common-test
-common-test:
+common-test: $(GOTEST_DIR)
 	@echo ">> running all tests"
-	GO111MODULE=$(GO111MODULE) $(GO) test $(test-flags) $(GOOPTS) $(pkgs)
+	GO111MODULE=$(GO111MODULE) $(GOTEST) $(test-flags) $(GOOPTS) $(pkgs)
+
+$(GOTEST_DIR):
+	@mkdir -p $@
 
 .PHONY: common-format
 common-format:
@@ -138,6 +202,15 @@ ifdef GO111MODULE
 else
 	$(GOLANGCI_LINT) run $(pkgs)
 endif
+endif
+
+.PHONY: common-yamllint
+common-yamllint:
+	@echo ">> running yamllint on all YAML files in the repository"
+ifeq (, $(shell which yamllint))
+	@echo "yamllint not installed so skipping"
+else
+	yamllint .
 endif
 
 # For backward-compatibility.
@@ -187,10 +260,12 @@ common-docker-publish: $(PUBLISH_DOCKER_ARCHS)
 $(PUBLISH_DOCKER_ARCHS): common-docker-publish-%:
 	docker push "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:$(DOCKER_IMAGE_TAG)"
 
+DOCKER_MAJOR_VERSION_TAG = $(firstword $(subst ., ,$(shell cat VERSION)))
 .PHONY: common-docker-tag-latest $(TAG_DOCKER_ARCHS)
 common-docker-tag-latest: $(TAG_DOCKER_ARCHS)
 $(TAG_DOCKER_ARCHS): common-docker-tag-latest-%:
 	docker tag "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:$(DOCKER_IMAGE_TAG)" "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:latest"
+	docker tag "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:$(DOCKER_IMAGE_TAG)" "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:v$(DOCKER_MAJOR_VERSION_TAG)"
 
 .PHONY: common-docker-manifest
 common-docker-manifest:

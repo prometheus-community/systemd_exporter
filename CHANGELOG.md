@@ -1,5 +1,7 @@
 ## master / unreleased
 
+Now released under the Prometheus Community
+
 * systemd_service_restart_total changed label name from `type` to `name` to be more compatible with Node Exporter.
 
 ## 0.4.0 / 2020-04-23

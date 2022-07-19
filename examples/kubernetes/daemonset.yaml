@@ -17,33 +17,33 @@ spec:
       labels:
         k8s-app: systemd-exporter
       annotations:
-         prometheus.io/scrape: "true"
-         prometheus.io/path: "/metrics"
-         prometheus.io/port: "9558"
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "9558"
     spec:
       securityContext:
         runAsUser: 0
       hostPID: true
       containers:
       - name: systemd-exporter
-        image: quay.io/povilasv/systemd-exporter:master
+        image: quay.io/prometheuscommunity/systemd-exporter:master
         securityContext:
           privileged: true
         args:
-          - --log.level=info
-          - --path.procfs=/host/proc
-          - --collector.unit-whitelist=kubelet.service|docker.service
+        - --log.level=info
+        - --path.procfs=/host/proc
+        - --collector.unit-whitelist=kubelet.service|docker.service
         ports:
-          - name: metrics
-            containerPort: 9558
-            hostPort: 9558
+        - name: metrics
+          containerPort: 9558
+          hostPort: 9558
         volumeMounts:
-          - name: proc
-            mountPath: /host/proc
-            readOnly:  true
-          - name: systemd
-            mountPath: /run/systemd
-            readOnly: true
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: systemd
+          mountPath: /run/systemd
+          readOnly: true
         resources:
           limits:
             memory: 100Mi
@@ -51,9 +51,9 @@ spec:
             cpu: 10m
             memory: 100Mi
       volumes:
-        - name: proc
-          hostPath:
-            path: /proc
-        - name: systemd
-          hostPath:
-            path: /run/systemd
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: systemd
+        hostPath:
+          path: /run/systemd

@@ -28,7 +28,7 @@ docker_cleanup() {
 }
 
 if [[ "$#" -ne 2 ]] ; then
-    echo "Usage: $0 quay.io/povilasv/systemd-exporter:v0.2.0 9558" >&2
+    echo "Usage: $0 quay.io/prometheuscommunity/systemd-exporter:v0.2.0 9558" >&2
     exit 1
 fi
 

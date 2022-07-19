@@ -1,9 +1,9 @@
 # Systemd exporter
 
-[![CircleCI](https://circleci.com/gh/povilasv/systemd_exporter/tree/master.svg?style=shield)](circleci)
-[![Go Report Card](https://goreportcard.com/badge/github.com/povilasv/systemd_exporter)](https://goreportcard.com/report/github.com/povilasv/systemd_exporter)
-[![Docker Pulls](https://img.shields.io/docker/pulls/povilasv/systemd-exporter.svg?maxAge=604800)](https://hub.docker.com/r/povilasv/systemd-exporter)
-[![Docker Repository on Quay](https://quay.io/repository/povilasv/systemd-exporter/status)][quay]
+[![CircleCI](https://circleci.com/gh/prometheus-community/systemd_exporter/tree/master.svg?style=shield)](circleci)
+[![Go Report Card](https://goreportcard.com/badge/github.com/prometheus-community/systemd_exporter)](https://goreportcard.com/report/github.com/prometheus-community/systemd_exporter)
+[![Docker Pulls](https://img.shields.io/docker/pulls/prometheus-community/systemd-exporter.svg?maxAge=604800)](https://hub.docker.com/r/prometheus-community/systemd-exporter)
+[![Docker Repository on Quay](https://quay.io/repository/prometheus-community/systemd-exporter/status)][quay]
 
 Prometheus exporter for systemd units, written in Go.
 

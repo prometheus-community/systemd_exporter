@@ -2,14 +2,14 @@
 version: 2.1
 
 orbs:
-  prometheus: prometheus/prometheus@0.1.0
+  prometheus: prometheus/prometheus@0.16.0
 
 executors:
   # Whenever the Go version is updated here, .promu.yml should
   # also be updated.
   golang:
     docker:
-      - image: circleci/golang:1.13
+      - image: cimg/go:1.18
 
 jobs:
   test:
@@ -23,7 +23,7 @@ jobs:
 
   codespell:
     docker:
-      - image: circleci/python
+      - image: cimg/python
 
     steps:
       - checkout
@@ -32,15 +32,15 @@ jobs:
 
   build:
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-2004:current
 
     environment:
-      DOCKER_TEST_IMAGE_NAME: quay.io/prometheus/golang-builder:1.13-base
-      REPO_PATH: github.com/povilasv/systemd_exporter
+      DOCKER_TEST_IMAGE_NAME: quay.io/prometheus/golang-builder:1.18-base
+      REPO_PATH: github.com/prometheus-community/systemd_exporter
 
     steps:
       - checkout
-      - run: docker run --privileged linuxkit/binfmt:v0.7
+      - run: docker run --privileged linuxkit/binfmt:v0.8
       - run: make promu
       - run: promu crossbuild
       - run: promu --config .promu.yml crossbuild
@@ -60,55 +60,6 @@ jobs:
             fi
       - run: docker images
       - run: docker run --rm -t -v "$(pwd):/app" "${DOCKER_TEST_IMAGE_NAME}" -i "${REPO_PATH}" -T
-# - run:
-#    command: |
-#      if [ -n "$CIRCLE_TAG" ]; then
-#        make test-docker DOCKER_IMAGE_TAG=$CIRCLE_TAG
-#      else
-#        make test-docker
-#      fi
-  publish_master:
-    docker:
-      - image: circleci/golang:1.13
-
-    steps:
-      - prometheus/setup_build_environment
-      - store_artifacts:
-          path: .tarballs
-          destination: releases
-      - prometheus/publish_images:
-          registry: docker.io
-          organization: povilasv
-          login_variable: DOCKER_LOGIN
-          password_variable: DOCKER_PASSWORD
-      - prometheus/publish_images:
-          registry: quay.io
-          organization: povilasv
-          login_variable: QUAY_LOGIN
-          password_variable: QUAY_PASSWORD
-
-  publish_release:
-    docker:
-      - image: circleci/golang:1.13
-
-    steps:
-      - prometheus/setup_build_environment
-      - run: promu crossbuild tarballs
-      - run: promu checksum .tarballs
-      - run: promu release .tarballs
-      - store_artifacts:
-          path: .tarballs
-          destination: releases
-      - prometheus/publish_release_images:
-          registry: docker.io
-          organization: povilasv
-          login_variable: DOCKER_LOGIN
-          password_variable: DOCKER_PASSWORD
-      - prometheus/publish_release_images:
-          registry: quay.io
-          organization: povilasv
-          login_variable: QUAY_LOGIN
-          password_variable: QUAY_PASSWORD
 
 workflows:
   version: 2
@@ -126,14 +77,16 @@ workflows:
           filters:
             tags:
               only: /.*/
-      - publish_master:
+      - prometheus/publish_main:
+          context: org-context
           requires:
             - test
             - build
           filters:
             branches:
               only: master
-      - publish_release:
+      - prometheus/publish_release:
+          context: org-context
           requires:
             - test
             - build

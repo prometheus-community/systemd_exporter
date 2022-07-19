@@ -1,9 +1,9 @@
 go:
     # Whenever the Go version is updated here, .travis.yml and
     # .circle/config.yml should also be updated.
-    version: 1.13
+    version: 1.18
 repository:
-    path: github.com/povilasv/systemd_exporter
+    path: github.com/prometheus-community/systemd_exporter
 build:
     binaries:
         - name: systemd_exporter
@@ -20,14 +20,4 @@ tarball:
         - NOTICE
 crossbuild:
     platforms:
-        - linux/amd64
-        - linux/386
-        - linux/arm
-        - linux/arm64
-        - linux/mips
-        - linux/mipsle
-        - linux/mips64
-        - linux/mips64le
-        - linux/ppc64
-        - linux/ppc64le
-        - linux/s390x
+        - linux

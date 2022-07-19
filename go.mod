@@ -7,8 +7,8 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.5.1
 	github.com/prometheus/common v0.9.1
-	github.com/prometheus/procfs v0.0.11
-	golang.org/x/sys v0.0.0-20200321134203-328b4cd54aae
+	github.com/prometheus/procfs v0.7.3
+	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )
 

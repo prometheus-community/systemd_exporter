@@ -16,11 +16,14 @@ package main
 import (
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 
+	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/systemd_exporter/systemd"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/log"
+	"github.com/prometheus/common/promlog"
+	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/version"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -45,32 +48,35 @@ func main() {
 		).Default("40").Int()
 	)
 
-	log.AddFlags(kingpin.CommandLine)
+	promlogConfig := &promlog.Config{}
+	flag.AddFlags(kingpin.CommandLine, promlogConfig)
 	kingpin.Version(version.Print("systemd_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
+	logger := promlog.New(promlogConfig)
 
-	log.Infoln("Starting systemd_exporter", version.Info())
-	log.Infoln("Build context", version.BuildContext())
+	level.Info(logger).Log("msg", "Starting systemd_exporter", "version", version.Info())
+	level.Info(logger).Log("msg", "Build context", "build_context", version.BuildContext())
 
 	exporterMetricsRegistry := prometheus.NewRegistry()
 	r := prometheus.NewRegistry()
 
 	r.MustRegister(version.NewCollector("systemd_exporter"))
 
-	collector, err := systemd.NewCollector(log.Base())
+	collector, err := systemd.NewCollector(logger)
 	if err != nil {
-		log.Fatalf("couldn't create collector: %s", err)
+		level.Error(logger).Log("msg", "Couldn't create collector", "err", err)
+		os.Exit(1)
 	}
 
 	if err := r.Register(collector); err != nil {
-		log.Fatalf("couldn't register systemd collector: %s", err)
+		level.Error(logger).Log("msg", "Couldn't register systemd collector", "err", err)
+		os.Exit(1)
 	}
 
 	handler := promhttp.HandlerFor(
 		prometheus.Gatherers{exporterMetricsRegistry, r},
 		promhttp.HandlerOpts{
-			ErrorLog:            log.NewErrorLogger(),
 			ErrorHandling:       promhttp.ContinueOnError,
 			MaxRequestsInFlight: *maxRequests,
 		},
@@ -92,12 +98,13 @@ func main() {
 			</body>
 			</html>`))
 		if err != nil {
-			log.Errorf("couldn't write response: %s", err)
+			level.Error(logger).Log("msg", "Couldn't write response", "err", err)
 		}
 	})
 
-	log.Infoln("Listening on", *listenAddress)
+	level.Info(logger).Log("msg", "Listening on", "address", *listenAddress)
 	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
-		log.Fatal(err)
+		level.Error(logger).Log("err", err)
+		os.Exit(1)
 	}
 }

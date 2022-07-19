@@ -23,11 +23,11 @@ jobs:
 
   codespell:
     docker:
-      - image: cimg/python
+      - image: cimg/python:3.10
 
     steps:
       - checkout
-      - run: sudo pip install codespell
+      - run: pip install codespell
       - run: codespell --skip=".git,./vendor,ttar,go.mod,go.sum,*pem" -L uint,packages\',uptodate
 
   build:

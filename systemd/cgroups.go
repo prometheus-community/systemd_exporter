@@ -23,8 +23,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
-	"github.com/prometheus/common/log"
 	"golang.org/x/sys/unix"
 )
 
@@ -77,7 +78,7 @@ const (
 // to track this
 // WARNING: We cache this data once at process start. Systemd updates
 // may require restarting systemd-exporter
-func cgUnifiedCached() (cgUnifiedMountMode, error) {
+func cgUnifiedCached(logger log.Logger) (cgUnifiedMountMode, error) {
 	if cgroupUnified != unifModeUnknown {
 		return cgroupUnified, nil
 	}
@@ -90,14 +91,14 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 
 	switch fs.Type {
 	case cgroup2SuperMagic:
-		log.Debugf("Found cgroup2 on /sys/fs/cgroup, full unified hierarchy")
+		level.Debug(logger).Log("msg", "Found cgroup2 on /sys/fs/cgroup, full unified hierarchy")
 		cgroupUnified = unifModeAll
 	case tmpFsMagic:
 		err := unix.Statfs("/sys/fs/cgroup/unified", &fs)
 
 		// Ignore err, we expect path to be missing on v232
 		if err == nil && fs.Type == cgroup2SuperMagic {
-			log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller")
+			level.Debug(logger).Log("msg", "Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller")
 			cgroupUnified = unifModeSystemd
 		} else {
 			err := unix.Statfs("/sys/fs/cgroup/systemd", &fs)
@@ -106,10 +107,10 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 			}
 			switch fs.Type {
 			case cgroup2SuperMagic:
-				log.Debugf("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)")
+				level.Debug(logger).Log("msg", "Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)")
 				cgroupUnified = unifModeSystemd
 			case cgroupSuperMagic:
-				log.Debugf("Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
+				level.Debug(logger).Log("msg", "Found cgroup on /sys/fs/cgroup/systemd, legacy hierarchy")
 				cgroupUnified = unifModeNone
 			default:
 				return unifModeUnknown, errors.Errorf("unknown magic number %x for fstype returned by statfs(/sys/fs/cgroup/systemd)", fs.Type)
@@ -125,11 +126,11 @@ func cgUnifiedCached() (cgUnifiedMountMode, error) {
 // cgGetPath returns the absolute path for a specific file in a specific controller
 // in the specific cgroup denoted by the passed subpath.
 // Input examples: ("cpu", "/system.slice", "cpuacct.usage_all)
-func cgGetPath(controller string, subpath string, suffix string) (string, error) {
+func cgGetPath(controller string, subpath string, suffix string, logger log.Logger) (string, error) {
 	// relevant systemd source code in cgroup-util.[h|c] specifically cg_get_path
 	//  2. Joins controller name with base path
 
-	unified, err := cgUnifiedCached()
+	unified, err := cgUnifiedCached(logger)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to determine cgroup mounting hierarchy")
 	}
@@ -216,10 +217,10 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 
 // NewCPUAcct will locate and read the kernel's cpu accounting info for
 // the provided systemd cgroup subpath.
-func NewCPUAcct(cgSubpath string) (*CPUAcct, error) {
+func NewCPUAcct(cgSubpath string, logger log.Logger) (*CPUAcct, error) {
 	var cpuUsage CPUAcct
 
-	cgPath, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all")
+	cgPath, err := cgGetPath("cpu", cgSubpath, "cpuacct.usage_all", logger)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to get cpu controller path")
 	}

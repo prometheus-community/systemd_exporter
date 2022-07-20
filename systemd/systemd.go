@@ -14,6 +14,7 @@
 package systemd
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -24,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/go-systemd/dbus"
+	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
@@ -59,6 +60,7 @@ var (
 )
 
 type Collector struct {
+	ctx                           context.Context
 	logger                        log.Logger
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -207,7 +209,10 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	unitWhitelistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitWhitelist))
 	unitBlacklistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitBlacklist))
 
+	// TODO: Build a custom handler to pass in the scrape http context.
+	ctx := context.TODO()
 	return &Collector{
+		ctx:                           ctx,
 		logger:                        logger,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -281,7 +286,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 	defer conn.Close()
 
-	allUnits, err := conn.ListUnits()
+	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
 		return errors.Wrap(err, "could not get list of systemd units from dbus")
 	}
@@ -418,7 +423,7 @@ func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metri
 // TODO metric is named unit but function is "Mount"
 func (c *Collector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	// TODO: wrap GetUnitTypePropertyString(
-	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Mount", "Type")
+	serviceTypeProperty, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Mount", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
 	}
@@ -437,7 +442,7 @@ func (c *Collector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.M
 
 // TODO the metric is named unit_info but function is named "Service"
 func (c *Collector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Service", "Type")
+	serviceTypeProperty, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "Type")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "Type")
 	}
@@ -453,7 +458,7 @@ func (c *Collector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- prometheus
 }
 
 func (c *Collector) collectServiceRestartCount(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	restartsCount, err := conn.GetUnitTypeProperty(unit.Name, "Service", "NRestarts")
+	restartsCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "NRestarts")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "NRestarts")
 	}
@@ -473,7 +478,7 @@ func (c *Collector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch chan<- pr
 
 	switch unit.ActiveState {
 	case "active":
-		timestampValue, err := conn.GetUnitProperty(unit.Name, "ActiveEnterTimestamp")
+		timestampValue, err := conn.GetUnitPropertyContext(c.ctx, unit.Name, "ActiveEnterTimestamp")
 		if err != nil {
 			return errors.Wrapf(err, errGetPropertyMsg, "ActiveEnterTimestamp")
 		}
@@ -498,7 +503,7 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 	// TODO: ExecStart type property, has a slice with process information.
 	// When systemd manages multiple processes, maybe we should add them all?
 
-	mainPID, err := conn.GetUnitTypeProperty(unit.Name, "Service", "MainPID")
+	mainPID, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "MainPID")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "MainPID")
 	}
@@ -558,7 +563,7 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 
 func (c *Collector) mustGetUnitStringTypeProperty(unitType string,
 	propName string, defaultVal string, conn *dbus.Conn, unit dbus.UnitStatus) string {
-	prop, err := conn.GetUnitTypeProperty(unit.Name, unitType, propName)
+	prop, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propName)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", errGetPropertyMsg, "prop_name", propName)
 		return defaultVal
@@ -574,7 +579,7 @@ func (c *Collector) mustGetUnitStringTypeProperty(unitType string,
 // A number of unit types support the 'ControlGroup' property needed to allow us to directly read their
 // resource usage from the kernel's cgroupfs cpu hierarchy. The only change is which dbus item we are querying
 func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	propCGSubpath, err := conn.GetUnitTypeProperty(unit.Name, unitType, "ControlGroup")
+	propCGSubpath, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "ControlGroup")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "ControlGroup")
 	}
@@ -603,7 +608,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return nil
 	}
 
-	propCPUAcct, err := conn.GetUnitTypeProperty(unit.Name, unitType, "CPUAccounting")
+	propCPUAcct, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "CPUAccounting")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "CPUAccounting")
 	}
@@ -638,7 +643,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 }
 
 func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	acceptedConnectionCount, err := conn.GetUnitTypeProperty(unit.Name, "Socket", "NAccepted")
+	acceptedConnectionCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Socket", "NAccepted")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "NAccepted")
 	}
@@ -647,7 +652,7 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 		c.socketAcceptedConnectionsDesc, prometheus.CounterValue,
 		float64(acceptedConnectionCount.Value.Value().(uint32)), unit.Name)
 
-	currentConnectionCount, err := conn.GetUnitTypeProperty(unit.Name, "Socket", "NConnections")
+	currentConnectionCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Socket", "NConnections")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "NConnections")
 	}
@@ -656,7 +661,7 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 		float64(currentConnectionCount.Value.Value().(uint32)), unit.Name)
 
 	// NRefused wasn't added until systemd 239.
-	refusedConnectionCount, err := conn.GetUnitTypeProperty(unit.Name, "Socket", "NRefused")
+	refusedConnectionCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Socket", "NRefused")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "NRefused")
 	}
@@ -676,7 +681,7 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 	}
 
 	for propertyName, desc := range unitPropertyToPromDesc {
-		property, err := conn.GetUnitTypeProperty(unit.Name, "Service", propertyName)
+		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", propertyName)
 		if err != nil {
 			return errors.Wrapf(err, errGetPropertyMsg, propertyName)
 		}
@@ -696,7 +701,7 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 // TODO either the unit should be called service_tasks, or it should work for all
 // units. It's currently named unit_task
 func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	tasksCurrentCount, err := conn.GetUnitTypeProperty(unit.Name, "Service", "TasksCurrent")
+	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksCurrent")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "TasksCurrent")
 	}
@@ -713,7 +718,7 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 			float64(currentCount), unit.Name)
 	}
 
-	tasksMaxCount, err := conn.GetUnitTypeProperty(unit.Name, "Service", "TasksMax")
+	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksMax")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "TasksMax")
 	}
@@ -733,7 +738,7 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 }
 
 func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	lastTriggerValue, err := conn.GetUnitTypeProperty(unit.Name, "Timer", "LastTriggerUSec")
+	lastTriggerValue, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Timer", "LastTriggerUSec")
 	if err != nil {
 		return errors.Wrapf(err, errGetPropertyMsg, "LastTriggerUSec")
 	}
@@ -749,12 +754,12 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 
 func (c *Collector) newDbus() (*dbus.Conn, error) {
 	if *systemdPrivate {
-		return dbus.NewSystemdConnection()
+		return dbus.NewSystemdConnectionContext(c.ctx)
 	}
 	if *systemdUser {
-		return dbus.NewUserConnection()
+		return dbus.NewUserConnectionContext(c.ctx)
 	}
-	return dbus.New()
+	return dbus.NewWithContext(c.ctx)
 }
 
 func (c *Collector) filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *regexp.Regexp) []dbus.UnitStatus {

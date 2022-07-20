@@ -79,6 +79,8 @@ workflows:
               only: /.*/
       - prometheus/publish_main:
           context: org-context
+          docker_hub_organization: prometheuscommunity
+          quay_io_organization: prometheuscommunity
           requires:
             - test
             - build
@@ -87,6 +89,8 @@ workflows:
               only: main
       - prometheus/publish_release:
           context: org-context
+          docker_hub_organization: prometheuscommunity
+          quay_io_organization: prometheuscommunity
           requires:
             - test
             - build

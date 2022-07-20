@@ -36,14 +36,14 @@ import (
 const namespace = "systemd"
 
 var (
-	unitWhitelist             = kingpin.Flag("collector.unit-whitelist", "Regexp of systemd units to whitelist. Units must both match whitelist and not match blacklist to be included.").Default(".+").String()
-	unitBlacklist             = kingpin.Flag("collector.unit-blacklist", "Regexp of systemd units to blacklist. Units must both match whitelist and not match blacklist to be included.").Default(".+\\.(device)").String()
-	systemdPrivate            = kingpin.Flag("collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
-	systemdUser               = kingpin.Flag("collector.user", "Connect to the user systemd instance.").Bool()
+	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
+	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
+	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	procPath                  = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
-	enableRestartsMetrics     = kingpin.Flag("collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
-	enableFDMetrics           = kingpin.Flag("collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
-	enableIPAccountingMetrics = kingpin.Flag("collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
+	enableFDMetrics           = kingpin.Flag("systemd.collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
+	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -82,8 +82,8 @@ type Collector struct {
 	ipIngressPackets              *prometheus.Desc
 	ipEgressPackets               *prometheus.Desc
 
-	unitWhitelistPattern *regexp.Regexp
-	unitBlacklistPattern *regexp.Regexp
+	unitIncludePattern *regexp.Regexp
+	unitExcludePattern *regexp.Regexp
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
@@ -204,8 +204,8 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		"Service unit egress IP accounting in packets.",
 		[]string{"name"}, nil,
 	)
-	unitWhitelistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitWhitelist))
-	unitBlacklistPattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitBlacklist))
+	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
+	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
 
 	return &Collector{
 		logger:                        logger,
@@ -230,8 +230,8 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		ipEgressBytes:                 ipEgressBytes,
 		ipIngressPackets:              ipIngressPackets,
 		ipEgressPackets:               ipEgressPackets,
-		unitWhitelistPattern:          unitWhitelistPattern,
-		unitBlacklistPattern:          unitBlacklistPattern,
+		unitIncludePattern:            unitIncludePattern,
+		unitExcludePattern:            unitExcludePattern,
 	}, nil
 }
 
@@ -288,7 +288,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	level.Debug(c.logger).Log("msg", "systemd ListUnits took", "seconds", time.Since(begin).Seconds())
 	begin = time.Now()
-	units := c.filterUnits(allUnits, c.unitWhitelistPattern, c.unitBlacklistPattern)
+	units := c.filterUnits(allUnits, c.unitIncludePattern, c.unitExcludePattern)
 	level.Debug(c.logger).Log("msg", "systemd filterUnits took", "seconds", time.Since(begin).Seconds())
 
 	var wg sync.WaitGroup
@@ -757,11 +757,11 @@ func (c *Collector) newDbus() (*dbus.Conn, error) {
 	return dbus.New()
 }
 
-func (c *Collector) filterUnits(units []dbus.UnitStatus, whitelistPattern, blacklistPattern *regexp.Regexp) []dbus.UnitStatus {
+func (c *Collector) filterUnits(units []dbus.UnitStatus, includePattern, excludePattern *regexp.Regexp) []dbus.UnitStatus {
 	filtered := make([]dbus.UnitStatus, 0, len(units))
 	for _, unit := range units {
-		if whitelistPattern.MatchString(unit.Name) &&
-			!blacklistPattern.MatchString(unit.Name) &&
+		if includePattern.MatchString(unit.Name) &&
+			!excludePattern.MatchString(unit.Name) &&
 			unit.LoadState == "loaded" {
 
 			level.Debug(c.logger).Log("msg", "Adding unit", "unit", unit.Name)

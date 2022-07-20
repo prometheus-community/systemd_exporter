@@ -35,8 +35,8 @@ process-exporter
 There is overlap between these three exporters, so make sure to read the documents if you use multiple. 
 
 For example, if you are using systemd-exporter, then you should *not* enable these flags in node-exporter 
-as we already expose identical metrics by default: `--collector.systemd.enable-task-metrics --collector.systemd.enable-restarts-metrics
- --collector.systemd.enable-start-time-metrics`. process-exporter has a concept of logically grouping 
+as we already expose identical metrics by default: `--systemd.collector.enable-task-metrics --systemd.collector.enable-restarts-metrics
+ --systemd.collector.enable-start-time-metrics`. process-exporter has a concept of logically grouping
 processes according to the process names. This is a bottom-up variant of logical process grouping, while 
 systemd's approach is top-down (e.g. groups are named and then processes are launched in them). The systemd
 approach provides much stronger guarantees that no processes/threads are "missing" from your group, but 
@@ -52,9 +52,9 @@ Optional Flags:
 
 Name     | Description | 
 ---------|-------------|
---collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
---collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
---collector.enable-ip-accounting | Enables service ip accounting metrics. This feature only works with systemd 235 and above.
+--systemd.collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
+--systemd.collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
+--systemd.collector.enable-ip-accounting | Enables service ip accounting metrics. This feature only works with systemd 235 and above.
 
 Of note, there is no customized support for `.snapshot` (removed in systemd v228), `.busname` (only present on systems using kdbus), `generated` (created via generators), `transient` (created during systemd-run) have no special support. 
 
@@ -103,10 +103,10 @@ Note that a number of unit types are filtered by default
 
 ## Configuration
 
-systemd_exporter allows you to include/exclude some systemd units. You can use `--collector.unit-whitelist` and `--collector.unit-blacklist` to select wanted units. Both of these options are in [RE2](https://github.com/google/re2/wiki/Syntax) syntax. For example:
+systemd_exporter allows you to include/exclude some systemd units. You can use `--systemd.collector.unit-include` and `--systemd.collector.unit-exclude` to select wanted units. Both of these options are in [RE2](https://github.com/google/re2/wiki/Syntax) syntax. For example:
 
 ```
 args:
-  - --collector.unit-whitelist=.*ceph.*\.service|ceph.*\.timer|kubelet.service|docker.service
-  - --collector.unit-blacklist=ceph-volume.*\.service
+  - --systemd.collector.unit-include=.*ceph.*\.service|ceph.*\.timer|kubelet.service|docker.service
+  - --systemd.collector.unit-exclude=ceph-volume.*\.service
 ```

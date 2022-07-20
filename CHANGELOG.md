@@ -1,8 +1,13 @@
-## master / unreleased
+## main / unreleased
+
+## 0.5.0 / 2022-07-20
 
 Now released under the Prometheus Community
 
-* systemd_service_restart_total changed label name from `type` to `name` to be more compatible with Node Exporter.
+* [CHANGE] systemd_service_restart_total changed label name from `type` to `name` #32
+* [CHANGE] Remove prommod metrics #36
+* [CHANGE] Rename collector flags #53
+* [FEATURE] Add TLS and Basic Auth #54
 
 ## 0.4.0 / 2020-04-23
 

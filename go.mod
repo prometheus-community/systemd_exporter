@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.12.2
 	github.com/prometheus/common v0.37.0
 	github.com/prometheus/exporter-toolkit v0.7.1
-	github.com/prometheus/procfs v0.7.3
+	github.com/prometheus/procfs v0.8.0
 	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )

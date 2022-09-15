@@ -1,43 +1,34 @@
 ---
 version: 2.1
-
 orbs:
-  prometheus: prometheus/prometheus@0.16.0
-
+  prometheus: "null"
 executors:
   # Whenever the Go version is updated here, .promu.yml should
   # also be updated.
   golang:
     docker:
       - image: cimg/go:1.18
-
 jobs:
   test:
     executor: golang
-
     steps:
       - prometheus/setup_environment
       - run: make
       - prometheus/store_artifact:
           file: systemd_exporter
-
   codespell:
     docker:
       - image: cimg/python:3.10
-
     steps:
       - checkout
       - run: pip install codespell
       - run: codespell --skip=".git,./vendor,ttar,go.mod,go.sum,*pem" -L uint,packages\',uptodate
-
   build:
     machine:
       image: ubuntu-2004:current
-
     environment:
       DOCKER_TEST_IMAGE_NAME: quay.io/prometheus/golang-builder:1.18-base
       REPO_PATH: github.com/prometheus-community/systemd_exporter
-
     steps:
       - checkout
       - run: docker run --privileged linuxkit/binfmt:v0.8
@@ -60,7 +51,6 @@ jobs:
             fi
       - run: docker images
       - run: docker run --rm -t -v "$(pwd):/app" "${DOCKER_TEST_IMAGE_NAME}" -i "${REPO_PATH}" -T
-
 workflows:
   version: 2
   systemd_exporter:

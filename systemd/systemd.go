@@ -67,6 +67,10 @@ type Collector struct {
 	unitStartTimeDesc             *prometheus.Desc
 	unitTasksCurrentDesc          *prometheus.Desc
 	unitTasksMaxDesc              *prometheus.Desc
+	unitActiveEnterTimeDesc       *prometheus.Desc
+	unitActiveExitTimeDesc        *prometheus.Desc
+	unitInactiveEnterTimeDesc     *prometheus.Desc
+	unitInactiveExitTimeDesc      *prometheus.Desc
 	nRestartsDesc                 *prometheus.Desc
 	timerLastTriggerDesc          *prometheus.Desc
 	socketAcceptedConnectionsDesc *prometheus.Desc
@@ -125,6 +129,26 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	unitTasksMaxDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
 		"Maximum number of tasks per Systemd unit",
+		[]string{"name", "type"}, nil,
+	)
+	unitActiveEnterTimeDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_active_enter_time_seconds"),
+		"Last time the unit transitioned into the active state",
+		[]string{"name", "type"}, nil,
+	)
+	unitActiveExitTimeDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_active_exit_time_seconds"),
+		"Last time the unit transitioned out of the active state",
+		[]string{"name", "type"}, nil,
+	)
+	unitInactiveEnterTimeDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_inactive_enter_time_seconds"),
+		"Last time the unit transitioned into the inactive state",
+		[]string{"name", "type"}, nil,
+	)
+	unitInactiveExitTimeDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_inactive_exit_time_seconds"),
+		"Last time the unit transitioned out of the inactive state",
 		[]string{"name", "type"}, nil,
 	)
 	nRestartsDesc := prometheus.NewDesc(
@@ -219,6 +243,10 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		unitStartTimeDesc:             unitStartTimeDesc,
 		unitTasksCurrentDesc:          unitTasksCurrentDesc,
 		unitTasksMaxDesc:              unitTasksMaxDesc,
+		unitActiveEnterTimeDesc:       unitActiveEnterTimeDesc,
+		unitActiveExitTimeDesc:        unitActiveExitTimeDesc,
+		unitInactiveEnterTimeDesc:     unitInactiveEnterTimeDesc,
+		unitInactiveExitTimeDesc:      unitInactiveExitTimeDesc,
 		nRestartsDesc:                 nRestartsDesc,
 		timerLastTriggerDesc:          timerLastTriggerDesc,
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
@@ -322,6 +350,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		// TODO should we continue processing here?
 	}
 
+	err = c.collectUnitTimeMetrics(conn, ch, unit)
+	if err != nil {
+		level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+	}
+
 	switch {
 	case strings.HasSuffix(unit.Name, ".service"):
 		err = c.collectServiceMetainfo(conn, ch, unit)
@@ -416,6 +449,42 @@ func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metri
 			c.unitState, prometheus.GaugeValue, isActive,
 			unit.Name, parseUnitType(unit), stateName)
 	}
+
+	return nil
+}
+
+func (c *Collector) collectUnitTimeMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	err := c.collectUnitTimeMetric(conn, ch, unit, c.unitActiveEnterTimeDesc, "ActiveEnterTimestamp")
+	if err != nil {
+		return err
+	}
+	err = c.collectUnitTimeMetric(conn, ch, unit, c.unitActiveExitTimeDesc, "ActiveExitTimestamp")
+	if err != nil {
+		return err
+	}
+	err = c.collectUnitTimeMetric(conn, ch, unit, c.unitInactiveEnterTimeDesc, "InactiveEnterTimestamp")
+	if err != nil {
+		return err
+	}
+	err = c.collectUnitTimeMetric(conn, ch, unit, c.unitInactiveExitTimeDesc, "InactiveExitTimestamp")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Collector) collectUnitTimeMetric(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, desc *prometheus.Desc, propertyName string) error {
+	timestampValue, err := conn.GetUnitPropertyContext(c.ctx, unit.Name, propertyName)
+	if err != nil {
+		return errors.Wrapf(err, errGetPropertyMsg, propertyName)
+	}
+	startTimeUsec, ok := timestampValue.Value.Value().(uint64)
+	if !ok {
+		return errors.Errorf(errConvertUint64PropertyMsg, propertyName, timestampValue.Value.Value())
+	}
+
+	ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(startTimeUsec)/1e6, unit.Name, parseUnitType(unit))
 
 	return nil
 }

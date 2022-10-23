@@ -32,10 +32,6 @@ import (
 
 func main() {
 	var (
-		listenAddress = kingpin.Flag(
-			"web.listen-address",
-			"Address on which to expose metrics and web interface.",
-		).Default(":9558").String()
 		metricsPath = kingpin.Flag(
 			"web.telemetry-path",
 			"Path under which to expose metrics.",
@@ -48,7 +44,7 @@ func main() {
 			"web.max-requests",
 			"Maximum number of parallel scrape requests. Use 0 to disable.",
 		).Default("40").Int()
-		webConfig = webflag.AddFlags(kingpin.CommandLine)
+		toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
 	)
 
 	promlogConfig := &promlog.Config{}
@@ -105,9 +101,8 @@ func main() {
 		}
 	})
 
-	level.Info(logger).Log("msg", "Listening on", "address", *listenAddress)
-	srv := &http.Server{Addr: *listenAddress}
-	if err := web.ListenAndServe(srv, *webConfig, logger); err != nil {
+	srv := &http.Server{}
+	if err := web.ListenAndServe(srv, toolkitFlags, logger); err != nil {
 		level.Error(logger).Log("err", err)
 		os.Exit(1)
 	}

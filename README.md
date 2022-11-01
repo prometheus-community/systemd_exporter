@@ -28,7 +28,7 @@ specific view of your system, allowing you to determine resource usage of an app
 This clearly allows more granular monitoring than machine-level metrics. However, we do not export 
 metrics for specific processes or threads. Said another way, the granularity of systemd-exporter is 
 limited by the size of the systemd unit. If you've chosen to pack 400 threads and 20 processes inside
-the `mysql.service`, we will only export metrics on the service unit, not on the individual tasks. For
+the `mysql.service`, we will only export metrics on the MainPid, not on the individual tasks nor the totals of the unit. For
 that level of detail (and numerous other "very fine grained") metrics, you should look into 
 process-exporter  
 

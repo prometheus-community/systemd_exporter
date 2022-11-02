@@ -17,6 +17,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"sync"
 
 	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/systemd_exporter/systemd"
@@ -25,13 +26,57 @@ import (
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/version"
-	"github.com/prometheus/exporter-toolkit/web"
-	webflag "github.com/prometheus/exporter-toolkit/web/kingpinflag"
+	// "github.com/prometheus/exporter-toolkit/web"
+	// webflag "github.com/prometheus/exporter-toolkit/web/kingpinflag"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 func main() {
+	listenAddress := mainCore()
+
+	tempPromlogConfig := &promlog.Config{}
+	tempLogger := promlog.New(tempPromlogConfig)
+
+	level.Info(tempLogger).Log("msg", "Listening on", "addr", listenAddress)
+	if err := http.ListenAndServe(listenAddress, nil); err != nil {
+		level.Error(tempLogger).Log("err", err)
+	}
+
+}
+
+func testMain(wg *sync.WaitGroup) *http.Server {
+	listenAddress := mainCore()
+
+	tempPromlogConfig := &promlog.Config{}
+	tempLogger := promlog.New(tempPromlogConfig)
+
+	// Launch server in background
+	srv := &http.Server{Addr: listenAddress}
+	level.Info(tempLogger).Log("msg", "Queuing test server startup")
+	go func() {
+		defer wg.Done()
+
+		// ErrServerClosed indicates graceful close
+		level.Info(tempLogger).Log("msg", "Test server listening on", "addr", listenAddress)
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			// unexpected error. port in use?
+			level.Error(tempLogger).Log("msg", "ListenAndServe()", "addr", err)
+		}
+
+		// Reset http package
+		http.DefaultServeMux = http.NewServeMux()
+		level.Info(tempLogger).Log("msg", "Test server shutdown")
+	}()
+
+	return srv
+}
+
+func mainCore() string {
 	var (
+		listenAddress = kingpin.Flag(
+			"web.listen-address",
+			"Address on which to expose metrics and web interface.",
+		).Default(":9558").String()
 		metricsPath = kingpin.Flag(
 			"web.telemetry-path",
 			"Path under which to expose metrics.",
@@ -44,7 +89,7 @@ func main() {
 			"web.max-requests",
 			"Maximum number of parallel scrape requests. Use 0 to disable.",
 		).Default("40").Int()
-		toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
+		//toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
 	)
 
 	promlogConfig := &promlog.Config{}
@@ -54,6 +99,7 @@ func main() {
 	kingpin.Parse()
 	logger := promlog.New(promlogConfig)
 
+	level.Debug(logger).Log("msg", "Parsed", "args", os.Args)
 	level.Info(logger).Log("msg", "Starting systemd_exporter", "version", version.Info())
 	level.Info(logger).Log("msg", "Build context", "build_context", version.BuildContext())
 
@@ -101,9 +147,5 @@ func main() {
 		}
 	})
 
-	srv := &http.Server{}
-	if err := web.ListenAndServe(srv, toolkitFlags, logger); err != nil {
-		level.Error(logger).Log("err", err)
-		os.Exit(1)
-	}
+	return *listenAddress
 }

@@ -1,4 +1,6 @@
-## main / unreleased
+logger## main / unreleased
+
+* `systemd_unit_state` label `type` has new meaning. Previously `type` contained service unit type (`simple`, `forking`, etc) or mount unit types (`aufs`, `ext3`, etc). Now `systemd_unit_state{type}` contains overall unit type (`service`, `scope`, etc) to allow easy PromQL group by clauses. Service and mount types have been moved to `systemd_unit_info` 
 
 ## 0.5.0 / 2022-07-20
 

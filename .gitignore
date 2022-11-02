@@ -1,2 +1,4 @@
 /systemd_exporter
 /bin/golangci-lint
+.idea
+coverage.txt

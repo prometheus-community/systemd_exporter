@@ -17,7 +17,6 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -212,7 +211,7 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 	defer f.Close()
 
 	reader := io.LimitReader(f, maxBufferSize)
-	return ioutil.ReadAll(reader)
+	return io.ReadAll(reader)
 }
 
 // NewCPUAcct will locate and read the kernel's cpu accounting info for

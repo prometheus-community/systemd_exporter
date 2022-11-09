@@ -17,6 +17,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"strconv"
 
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
@@ -568,9 +570,97 @@ func (c *Collector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch chan<- pr
 	return nil
 }
 
+type ProcTotals = struct {
+	cpuTime float64
+	vSize   uint64
+	rss     uint64
+	openFDs uint
+
+	limitFDs          uint64
+	limitAddressSpace uint64
+}
+
+func (c *Collector) collectProcTreeMetrics(fs procfs.FS, totals *ProcTotals, pid int) error {
+	level.Debug(c.logger).Log("msg", "Entering collectProcTreeMetrics", "pid", pid)
+	p, err := fs.Proc(int(pid))
+	if err != nil {
+		return err
+	}
+
+	stat, err := p.Stat()
+	if err != nil {
+		return err
+	}
+
+	totals.cpuTime += stat.CPUTime()
+	totals.vSize += uint64(stat.VirtualMemory())
+	totals.rss += uint64(stat.ResidentMemory())
+
+	if *enableFDMetrics {
+		fds, err := p.FileDescriptorsLen()
+		if err != nil {
+			return errors.Wrap(err, "couldn't get process file descriptor size")
+		}
+		totals.openFDs += uint(fds)
+	}
+
+	limits, err := p.Limits()
+	if err != nil {
+		return errors.Wrap(err, "couldn't get process limits")
+	}
+
+	// For process limits, adding multiple processes makes no sense.
+	// Instead, return the smallest of the limits.
+
+	if limits.OpenFiles < totals.limitFDs {
+		totals.limitFDs = limits.OpenFiles
+	}
+	if limits.AddressSpace < totals.limitAddressSpace {
+		totals.limitAddressSpace = limits.AddressSpace
+	}
+
+	allpids := map[int]bool{}
+	// Recurse on the children.
+	// Do we really have to do it ourselves using the /proc/[pid]/task/[tid]/children files???
+	// Collect to a set in case the different TIDs have duplicate child PIDs.
+	taskpath := fmt.Sprintf("/proc/%d/task/", pid)
+	items, _ := os.ReadDir(taskpath)
+	for _, item := range items {
+		if item.IsDir() {
+			childrenpath := taskpath + item.Name() + "/children"
+			// read file
+			contentbytes, err := os.ReadFile(childrenpath)
+			if err != nil {
+				return errors.Wrap(err, "couldn't read 'children' file")
+			}
+			// parse PIDs inside, add to set
+			pidstrings := strings.Fields(string(contentbytes))
+			for _, item := range pidstrings {
+				pid, err := strconv.Atoi(item)
+				if err != nil {
+					return errors.Wrap(err, "couldn't decode child PID")
+				}
+				allpids[pid] = true
+			}
+		}
+	}
+
+	err = nil
+
+	for k := range allpids {
+		level.Debug(c.logger).Log("msg", "Recursing into collectProcTreeMetrics", "pid", k, "ppid", pid)
+		err = c.collectProcTreeMetrics(fs, totals, k)
+		if err != nil {
+			break
+		}
+	}
+
+	return err
+}
+
 func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	// TODO: ExecStart type property, has a slice with process information.
-	// When systemd manages multiple processes, maybe we should add them all?
+	// When systemd manages multiple processes, add them all.
 
 	mainPID, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "MainPID")
 	if err != nil {
@@ -591,40 +681,31 @@ func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prom
 	if err != nil {
 		return err
 	}
-	p, err := fs.Proc(int(pid))
-	if err != nil {
-		return err
-	}
 
-	stat, err := p.Stat()
+	totals := ProcTotals{
+		limitFDs:          math.MaxUint64,
+		limitAddressSpace: math.MaxUint64}
+	err = c.collectProcTreeMetrics(fs, &totals, int(pid))
 	if err != nil {
 		return err
 	}
 
 	ch <- prometheus.MustNewConstMetric(
 		c.cpuTotalDesc, prometheus.CounterValue,
-		stat.CPUTime(), unit.Name)
+		totals.cpuTime, unit.Name)
 	ch <- prometheus.MustNewConstMetric(c.vsize, prometheus.GaugeValue,
-		float64(stat.VirtualMemory()), unit.Name)
+		float64(totals.vSize), unit.Name)
 	ch <- prometheus.MustNewConstMetric(c.rss, prometheus.GaugeValue,
-		float64(stat.ResidentMemory()), unit.Name)
+		float64(totals.rss), unit.Name)
 
-	limits, err := p.Limits()
-	if err != nil {
-		return errors.Wrap(err, "couldn't get process limits")
-	}
 	ch <- prometheus.MustNewConstMetric(c.maxFDs, prometheus.GaugeValue,
-		float64(limits.OpenFiles), unit.Name)
+		float64(totals.limitFDs), unit.Name)
 	ch <- prometheus.MustNewConstMetric(c.maxVsize, prometheus.GaugeValue,
-		float64(limits.AddressSpace), unit.Name)
+		float64(totals.limitAddressSpace), unit.Name)
 
 	if *enableFDMetrics {
-		fds, err := p.FileDescriptorsLen()
-		if err != nil {
-			return errors.Wrap(err, "couldn't get process file descriptor size")
-		}
 		ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
-			float64(fds), unit.Name)
+			float64(totals.openFDs), unit.Name)
 	}
 
 	return nil

@@ -3,7 +3,7 @@ module github.com/prometheus-community/systemd_exporter
 go 1.17
 
 require (
-	github.com/coreos/go-systemd/v22 v22.4.0
+	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/go-kit/log v0.2.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.13.0

@@ -30,7 +30,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/procfs"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -41,9 +40,7 @@ var (
 	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
 	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
-	procPath                  = kingpin.Flag("path.procfs", "procfs mountpoint.").Default(procfs.DefaultMountPoint).String()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
-	enableFDMetrics           = kingpin.Flag("systemd.collector.enable-file-descriptor-size", "Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd for this to work.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
 )
 
@@ -62,6 +59,7 @@ var (
 type Collector struct {
 	ctx                           context.Context
 	logger                        log.Logger
+	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
 	unitStartTimeDesc             *prometheus.Desc
@@ -76,13 +74,6 @@ type Collector struct {
 	socketAcceptedConnectionsDesc *prometheus.Desc
 	socketCurrentConnectionsDesc  *prometheus.Desc
 	socketRefusedConnectionsDesc  *prometheus.Desc
-	cpuTotalDesc                  *prometheus.Desc
-	unitCPUTotal                  *prometheus.Desc
-	openFDs                       *prometheus.Desc
-	maxFDs                        *prometheus.Desc
-	vsize                         *prometheus.Desc
-	maxVsize                      *prometheus.Desc
-	rss                           *prometheus.Desc
 	ipIngressBytes                *prometheus.Desc
 	ipEgressBytes                 *prometheus.Desc
 	ipIngressPackets              *prometheus.Desc
@@ -167,11 +158,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "socket_refused_connections_total"),
 		"Total number of refused socket connections", []string{"name"}, nil)
 
-	cpuTotalDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "process_cpu_seconds_total"),
-		"Total user and system CPU time spent in seconds.",
-		[]string{"name"}, nil,
-	)
 	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
 	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metics
 	// e.g. (2 modes * 4 cores) per enabled unit
@@ -179,35 +165,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
 		"Unit CPU time in seconds",
 		[]string{"name", "type", "mode"}, nil,
-	)
-
-	openFDs := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "process_open_fds"),
-		"Number of open file descriptors.",
-		[]string{"name"}, nil,
-	)
-
-	maxFDs := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "process_max_fds"),
-		"Maximum number of open file descriptors.",
-		[]string{"name"}, nil,
-	)
-	vsize := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "process_virtual_memory_bytes"),
-		"Virtual memory size in bytes.",
-		[]string{"name"}, nil,
-	)
-
-	maxVsize := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "process_virtual_memory_max_bytes"),
-		"Maximum amount of virtual memory available in bytes.",
-		[]string{"name"}, nil,
-	)
-
-	rss := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "process_resident_memory_bytes"),
-		"Resident memory size in bytes.",
-		[]string{"name"}, nil,
 	)
 
 	ipIngressBytes := prometheus.NewDesc(
@@ -238,6 +195,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	return &Collector{
 		ctx:                           ctx,
 		logger:                        logger,
+		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
 		unitStartTimeDesc:             unitStartTimeDesc,
@@ -252,13 +210,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
 		socketCurrentConnectionsDesc:  socketCurrentConnectionsDesc,
 		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
-		cpuTotalDesc:                  cpuTotalDesc,
-		unitCPUTotal:                  unitCPUTotal,
-		openFDs:                       openFDs,
-		maxFDs:                        maxFDs,
-		vsize:                         vsize,
-		maxVsize:                      maxVsize,
-		rss:                           rss,
 		ipIngressBytes:                ipIngressBytes,
 		ipEgressBytes:                 ipEgressBytes,
 		ipIngressPackets:              ipIngressPackets,
@@ -278,6 +229,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 // Describe gathers descriptions of Metrics
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
+	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
 	desc <- c.unitStartTimeDesc
@@ -288,12 +240,6 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.socketAcceptedConnectionsDesc
 	desc <- c.socketCurrentConnectionsDesc
 	desc <- c.socketRefusedConnectionsDesc
-	desc <- c.cpuTotalDesc
-	desc <- c.openFDs
-	desc <- c.maxFDs
-	desc <- c.vsize
-	desc <- c.maxVsize
-	desc <- c.rss
 	desc <- c.ipIngressBytes
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
@@ -379,10 +325,6 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		}
 
-		err = c.collectServiceProcessMetrics(conn, ch, unit)
-		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
-		}
 		err = c.collectUnitCPUUsageMetrics("Service", conn, ch, unit)
 		if err != nil {
 			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
@@ -564,68 +506,6 @@ func (c *Collector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch chan<- pr
 	ch <- prometheus.MustNewConstMetric(
 		c.unitStartTimeDesc, prometheus.GaugeValue,
 		float64(startTimeUsec)/1e6, unit.Name, parseUnitType(unit))
-
-	return nil
-}
-
-func (c *Collector) collectServiceProcessMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	// TODO: ExecStart type property, has a slice with process information.
-	// When systemd manages multiple processes, maybe we should add them all?
-
-	mainPID, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "MainPID")
-	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "MainPID")
-	}
-
-	pid, ok := mainPID.Value.Value().(uint32)
-	if !ok {
-		return errors.Errorf(errConvertUint32PropertyMsg, "MainPID", mainPID.Value.Value())
-	}
-
-	// MainPID 0 when the service currently has no main PID
-	if pid == 0 {
-		return nil
-	}
-
-	fs, err := procfs.NewFS(*procPath)
-	if err != nil {
-		return err
-	}
-	p, err := fs.Proc(int(pid))
-	if err != nil {
-		return err
-	}
-
-	stat, err := p.Stat()
-	if err != nil {
-		return err
-	}
-
-	ch <- prometheus.MustNewConstMetric(
-		c.cpuTotalDesc, prometheus.CounterValue,
-		stat.CPUTime(), unit.Name)
-	ch <- prometheus.MustNewConstMetric(c.vsize, prometheus.GaugeValue,
-		float64(stat.VirtualMemory()), unit.Name)
-	ch <- prometheus.MustNewConstMetric(c.rss, prometheus.GaugeValue,
-		float64(stat.ResidentMemory()), unit.Name)
-
-	limits, err := p.Limits()
-	if err != nil {
-		return errors.Wrap(err, "couldn't get process limits")
-	}
-	ch <- prometheus.MustNewConstMetric(c.maxFDs, prometheus.GaugeValue,
-		float64(limits.OpenFiles), unit.Name)
-	ch <- prometheus.MustNewConstMetric(c.maxVsize, prometheus.GaugeValue,
-		float64(limits.AddressSpace), unit.Name)
-
-	if *enableFDMetrics {
-		fds, err := p.FileDescriptorsLen()
-		if err != nil {
-			return errors.Wrap(err, "couldn't get process file descriptor size")
-		}
-		ch <- prometheus.MustNewConstMetric(c.openFDs, prometheus.GaugeValue,
-			float64(fds), unit.Name)
-	}
 
 	return nil
 }

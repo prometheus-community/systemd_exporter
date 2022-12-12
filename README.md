@@ -9,15 +9,16 @@ Prometheus exporter for systemd units, written in Go.
 
 ## Relation to Node and Process Exporter
 
-The focus on each exporter is different. node-exporter has a broad focus, and process-exporter
+The focus on each exporter is different. For example, the [node_exporter](https://github.com/prometheus/node_exporter/) has a broad node level focus, and the [process-exporter](https://github.com/ncabatoff/process-exporter)
 is focused on deep analysis of specific processes. systemd-exporter aims to fit in the middle, taking 
 advantage of systemd's builtin process and thread grouping to provide application-level metrics. 
 
 | Exporter         | Metric Goals                               | Example                                            |
 | ---------------- | ------------------------------------------ | -------------------------------------------------- |
 | node-exporter    | Machine-wide monitoring and usage summary  | CPU usage of entire node (e.g. `127.0.0.1`)        |
-| systemd-exporter | Systemd unit monitoring and resource usage | CPU usage of each service (e.g. `mongodb.service`) |
+| systemd-exporter | Systemd unit monitoring and resource usage | The state of each service (e.g. `mongodb.service`) |
 | process-exporter | Focus is on individual processes           | CPU of specific process ID (e.g. `1127`)           |
+| cAdvisor         | Metrics per cgroup (systemd uses cgroups)  | CPU usage of each cgroup (e.g. `system.slice/mongodb.service`
 
 Systemd groups processes, threads, and other resources (PIDs, memory, etc) into logical containers 
 called units. Systemd-exporter will read the 11 different types of systemd units (e.g. service, slice, etc)
@@ -28,9 +29,9 @@ specific view of your system, allowing you to determine resource usage of an app
 This clearly allows more granular monitoring than machine-level metrics. However, we do not export 
 metrics for specific processes or threads. Said another way, the granularity of systemd-exporter is 
 limited by the size of the systemd unit. If you've chosen to pack 400 threads and 20 processes inside
-the `mysql.service`, we will only export metrics on the service unit, not on the individual tasks. For
-that level of detail (and numerous other "very fine grained") metrics, you should look into 
-process-exporter  
+the `mysql.service`, we will only export systemd provided metrics on the service unit, not on the
+individual tasks. For that level of detail (and numerous other "very fine grained") metrics, you
+should look into process-exporter.
 
 There is overlap between these three exporters, so make sure to read the documents if you use multiple. 
 
@@ -94,12 +95,6 @@ Note that a number of unit types are filtered by default
 | systemd_socket_current_connections        | Gauge       | UNSTABLE | 1 per socket                                                       |
 | systemd_socket_refused_connections_total  | Gauge       | UNSTABLE | 1 per socket                                                       |
 | systemd_timer_last_trigger_seconds        | Gauge       | UNSTABLE | 1 per timer                                                        |
-| systemd_process_resident_memory_bytes     | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_process_virtual_memory_bytes      | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_process_virtual_memory_max_bytes  | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_process_open_fds                  | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_process_max_fds                   | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_process_cpu_seconds_total         | Counter     | UNSTABLE | 1 per service                                                      |
 
 ## Configuration
 

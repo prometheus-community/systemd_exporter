@@ -1,0 +1,17 @@
+# requires that you have deployed the PodMonitor CRD (comes with Prometheus)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: systemd-exporter
+  labels:
+    app.kubernetes.io/name: systemd-exporter-podmonitor
+spec:
+  podMetricsEndpoints:
+  - port: metrics
+    path: "/metrics"
+    interval: 30s
+    scrapeTimeout: 10s
+  jobLabel: systemd-exporter
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: systemd-exporter

@@ -558,6 +558,18 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return nil
 	}
 
+	propCPUAcct, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "CPUAccounting")
+	if err != nil {
+		return errors.Wrapf(err, errGetPropertyMsg, "CPUAccounting")
+	}
+	cpuAcct, ok := propCPUAcct.Value.Value().(bool)
+	if !ok {
+		return errors.Errorf(errConvertStringPropertyMsg, "CPUAccounting", propCPUAcct.Value.Value())
+	}
+	if !cpuAcct {
+		return nil
+	}
+
 	cpuUsage, err := NewCPUUsage(cgSubpath, c.logger)
 	if err != nil {
 		if unitType == "Socket" {

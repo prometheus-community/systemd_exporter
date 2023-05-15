@@ -18,6 +18,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/systemd_exporter/systemd"
 	"github.com/prometheus/client_golang/prometheus"
@@ -27,7 +28,6 @@ import (
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	webflag "github.com/prometheus/exporter-toolkit/web/kingpinflag"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 func main() {
@@ -88,18 +88,25 @@ func main() {
 	}
 
 	http.Handle(*metricsPath, handler)
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_, err := w.Write([]byte(`<html>
-			<head><title>Systemd Exporter</title></head>
-			<body>
-			<h1>Systemd Exporter</h1>
-			<p><a href="` + *metricsPath + `">Metrics</a></p>
-			</body>
-			</html>`))
-		if err != nil {
-			level.Error(logger).Log("msg", "Couldn't write response", "err", err)
+	if *metricsPath != "/" && *metricsPath != "" {
+		landingConfig := web.LandingConfig{
+			Name:        "systemd Exporter",
+			Description: "Prometheus Exporter for systemd",
+			Version:     version.Info(),
+			Links: []web.LandingLinks{
+				{
+					Address: *metricsPath,
+					Text:    "Metrics",
+				},
+			},
 		}
-	})
+		landingPage, err := web.NewLandingPage(landingConfig)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			os.Exit(1)
+		}
+		http.Handle("/", landingPage)
+	}
 
 	srv := &http.Server{}
 	if err := web.ListenAndServe(srv, toolkitFlags, logger); err != nil {

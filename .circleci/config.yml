@@ -2,14 +2,14 @@
 version: 2.1
 
 orbs:
-  prometheus: prometheus/prometheus@0.16.0
+  prometheus: prometheus/prometheus@0.17.1
 
 executors:
   # Whenever the Go version is updated here, .promu.yml should
   # also be updated.
   golang:
     docker:
-      - image: cimg/go:1.18
+      - image: cimg/go:1.20
 
 jobs:
   test:
@@ -23,7 +23,7 @@ jobs:
 
   codespell:
     docker:
-      - image: cimg/python:3.10
+      - image: cimg/python:3.11
 
     steps:
       - checkout
@@ -32,7 +32,7 @@ jobs:
 
   build:
     machine:
-      image: ubuntu-2004:current
+      image: ubuntu-2204:current
 
     environment:
       DOCKER_TEST_IMAGE_NAME: quay.io/prometheus/golang-builder:1.18-base

@@ -17,7 +17,6 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -196,8 +195,8 @@ func (c *CPUAcct) UsageAllNanosecs() uint64 {
 	return nanoseconds
 }
 
-// ReadFileNoStat uses ioutil.ReadAll to read contents of entire file.
-// This is similar to ioutil.ReadFile but without the call to os.Stat, because
+// ReadFileNoStat uses io.ReadAll to read contents of entire file.
+// This is similar to os.ReadFile but without the call to os.Stat, because
 // many files in /proc and /sys report incorrect file sizes (either 0 or 4096).
 // Reads a max file size of 512kB.  For files larger than this, a scanner
 // should be used.
@@ -212,7 +211,7 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 	defer f.Close()
 
 	reader := io.LimitReader(f, maxBufferSize)
-	return ioutil.ReadAll(reader)
+	return io.ReadAll(reader)
 }
 
 // NewCPUAcct will locate and read the kernel's cpu accounting info for

@@ -25,12 +25,12 @@ import (
 	"sync"
 	"time"
 
+	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 const namespace = "systemd"
@@ -159,7 +159,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		"Total number of refused socket connections", []string{"name"}, nil)
 
 	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
-	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metics
+	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metrics
 	// e.g. (2 modes * 4 cores) per enabled unit
 	unitCPUTotal := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),

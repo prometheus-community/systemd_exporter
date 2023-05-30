@@ -32,8 +32,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const namespace = "systemd"
-const watchdogSubsystem = "watchdog"
+const (
+	namespace         = "systemd"
+	watchdogSubsystem = "watchdog"
+)
 
 var (
 	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
@@ -70,6 +72,7 @@ type Collector struct {
 	unitActiveExitTimeDesc        *prometheus.Desc
 	unitInactiveEnterTimeDesc     *prometheus.Desc
 	unitInactiveExitTimeDesc      *prometheus.Desc
+	unitMemoryCurrentDesc         *prometheus.Desc
 	nRestartsDesc                 *prometheus.Desc
 	timerLastTriggerDesc          *prometheus.Desc
 	socketAcceptedConnectionsDesc *prometheus.Desc
@@ -154,6 +157,11 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "unit_inactive_exit_time_seconds"),
 		"Last time the unit transitioned out of the inactive state",
 		[]string{"name", "type"}, nil,
+	)
+	unitMemoryCurrentDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_memory_current_bytes"),
+		"Current memory usage per Systemd unit in bytes",
+		[]string{"name"}, nil,
 	)
 	nRestartsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_restart_total"),
@@ -240,6 +248,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		unitActiveExitTimeDesc:        unitActiveExitTimeDesc,
 		unitInactiveEnterTimeDesc:     unitInactiveEnterTimeDesc,
 		unitInactiveExitTimeDesc:      unitInactiveExitTimeDesc,
+		unitMemoryCurrentDesc:         unitMemoryCurrentDesc,
 		nRestartsDesc:                 nRestartsDesc,
 		timerLastTriggerDesc:          timerLastTriggerDesc,
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
@@ -276,6 +285,7 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.unitStartTimeDesc
 	desc <- c.unitTasksCurrentDesc
 	desc <- c.unitTasksMaxDesc
+	desc <- c.unitMemoryCurrentDesc
 	desc <- c.nRestartsDesc
 	desc <- c.timerLastTriggerDesc
 	desc <- c.socketAcceptedConnectionsDesc
@@ -341,13 +351,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
-	stages := []string{"Finish", "Firmware", "Loader", "Kernel", "InitRD",
+	stages := []string{
+		"Finish", "Firmware", "Loader", "Kernel", "InitRD",
 		"InitRDGeneratorsStart", "InitRDGeneratorsFinish",
 		"InitRDSecurityStart", "InitRDSecurityFinish",
 		"InitRDUnitsLoadStart", "InitRDUnitsLoadFinish",
 		"GeneratorsStart", "GeneratorsFinish",
 		"SecurityStart", "SecurityFinish", "Userspace",
-		"UnitsLoadStart", "UnitsLoadFinish"}
+		"UnitsLoadStart", "UnitsLoadFinish",
+	}
 
 	for _, stage := range stages {
 		stageMonotonicValue, err := conn.GetManagerProperty(fmt.Sprintf("%sTimestampMonotonic", stage))
@@ -419,6 +431,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		}
 
 		err = c.collectServiceTasksMetrics(conn, ch, unit)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		err = c.collectServiceMemoryMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
@@ -673,6 +690,27 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 		ch <- prometheus.MustNewConstMetric(
 			c.unitTasksMaxDesc, prometheus.GaugeValue,
 			float64(maxCount), unit.Name, parseUnitType(unit))
+	}
+
+	return nil
+}
+
+func (c *Collector) collectServiceMemoryMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+	memoryCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "MemoryCurrent")
+	if err != nil {
+		return fmt.Errorf(errGetPropertyMsg, "MemoryCurrent", err)
+	}
+
+	currentCount, ok := memoryCurrentCount.Value.Value().(uint64)
+	if !ok {
+		return fmt.Errorf(errConvertUint64PropertyMsg, "MemoryCurrent", memoryCurrentCount.Value.Value())
+	}
+
+	// Don't set if memoryCurrent if dbus reports MaxUint64.
+	if currentCount != math.MaxUint64 {
+		ch <- prometheus.MustNewConstMetric(
+			c.unitMemoryCurrentDesc, prometheus.GaugeValue,
+			float64(currentCount), unit.Name)
 	}
 
 	return nil

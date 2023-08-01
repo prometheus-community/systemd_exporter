@@ -10,7 +10,7 @@ require (
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
 	github.com/prometheus/exporter-toolkit v0.10.0
-	golang.org/x/sys v0.9.0
+	golang.org/x/sys v0.10.0
 )
 
 require (

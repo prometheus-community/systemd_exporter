@@ -569,7 +569,7 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return nil
 	}
 
-	cpuUsage, err := NewCPUAcct(cgSubpath, c.logger)
+	cpuStat, err := GetCPUStatOrAcct(cgSubpath, c.logger)
 	if err != nil {
 		if unitType == "Socket" {
 			level.Debug(c.logger).Log("msg", "unable to read SocketUnit CPU accounting information", "unit", unit.Name)
@@ -578,8 +578,8 @@ func (c *Collector) collectUnitCPUUsageMetrics(unitType string, conn *dbus.Conn,
 		return errors.Wrapf(err, errControlGroupReadMsg, "CPU usage")
 	}
 
-	userSeconds := float64(cpuUsage.UsageUserNanosecs()) / 1000000000.0
-	sysSeconds := float64(cpuUsage.UsageSystemNanosecs()) / 1000000000.0
+	userSeconds := float64(cpuStat.UserUsec) / 1000000.0
+	sysSeconds := float64(cpuStat.SystemUsec) / 1000000.0
 
 	ch <- prometheus.MustNewConstMetric(
 		c.unitCPUTotal, prometheus.CounterValue,

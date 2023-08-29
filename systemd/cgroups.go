@@ -165,6 +165,13 @@ type CPUAcct struct {
 	CPUs []CPUUsage
 }
 
+// CPUStat stores CPU usage for a control group (aka cgroup) of tasks
+// (e.g. both processes and threads), equivalent to cpu.stat.
+type CPUStat struct {
+	SystemUsec uint64
+	UserUsec   uint64
+}
+
 // UsageUserNanosecs returns user (e.g. non-kernel) cpu consumption in nanoseconds, across all available cpu
 // cores, from the point that CPU accounting was enabled for this control group.
 func (c *CPUAcct) UsageUserNanosecs() uint64 {
@@ -215,7 +222,7 @@ func ReadFileNoStat(filename string) ([]byte, error) {
 }
 
 // NewCPUAcct will locate and read the kernel's cpu accounting info for
-// the provided systemd cgroup subpath.
+// the provided systemd cgroup v1 subpath at cpuacct.usage_all.
 func NewCPUAcct(cgSubpath string, logger log.Logger) (*CPUAcct, error) {
 	var cpuUsage CPUAcct
 
@@ -273,4 +280,89 @@ func NewCPUAcct(cgSubpath string, logger log.Logger) (*CPUAcct, error) {
 	}
 
 	return &cpuUsage, nil
+}
+
+// NewCPUStat will locate and read the kernel's cpu accounting info for
+// the provided systemd cgroup (v2) subpath at cpu.stat
+func NewCPUStat(cgSubpath string, logger log.Logger) (*CPUStat, error) {
+	var cpuStat CPUStat
+	gotUser, gotSys := false, false
+
+	cgPath, err := cgGetPath("cpu", cgSubpath, "cpu.stat", logger)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to get cpu controller path")
+	}
+
+	// Example cpu.stat contents:
+	// usage_usec 132924420
+	// user_usec 81717788
+	// system_usec 51206632
+	// core_sched.force_idle_usec 0
+
+	b, err := ReadFileNoStat(cgPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to read file %s", cgPath)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, errors.Wrapf(err, "unable to scan file %s", cgPath)
+		}
+		text := scanner.Text()
+		vals := strings.Split(text, " ")
+		if len(vals) != 2 {
+			return nil, errors.Errorf("unable to parse contents of file %s", cgPath)
+		}
+
+		switch vals[0] {
+		case "user_usec":
+			cpuStat.UserUsec, err = strconv.ParseUint(vals[1], 10, 64)
+			gotUser = true
+		case "system_usec":
+			cpuStat.SystemUsec, err = strconv.ParseUint(vals[1], 10, 64)
+			gotSys = true
+		default:
+			// skip other keys
+			continue
+		}
+
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to parse %s as uint64 (from %s)", vals[1], cgPath)
+		}
+
+		// exit early if we got what we're after
+		if gotUser && gotSys {
+			break
+		}
+
+	}
+
+	if !gotUser || !gotSys {
+		return nil, errors.Errorf("could not get usage info from %s", cgPath)
+	}
+
+	return &cpuStat, nil
+}
+
+// GetCPUStatOrAcct will try both cgroup v2 and v1 paths (in that order), getting
+// user and system CPU usage in microseconds.
+func GetCPUStatOrAcct(cgSubpath string, logger log.Logger) (*CPUStat, error) {
+	cpuStat, statErr := NewCPUStat(cgSubpath, logger)
+	if statErr != nil {
+		cpuAcct, acctErr := NewCPUAcct(cgSubpath, logger)
+		if acctErr != nil {
+			// with go 1.20 we can return both errors: return nil, errors.Join(statErr, acctErr)
+			return nil, acctErr
+		}
+
+		level.Debug(logger).Log("msg", "got CPU accounting metrics from cgroup v1 hierarchy due to error reading from v2", "error", statErr)
+
+		cpuStat = &CPUStat{
+			UserUsec:   cpuAcct.UsageUserNanosecs() / 1000.0,
+			SystemUsec: cpuAcct.UsageSystemNanosecs() / 1000.0,
+		}
+	}
+
+	return cpuStat, nil
 }

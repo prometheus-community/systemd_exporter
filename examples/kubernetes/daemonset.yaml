@@ -3,11 +3,11 @@ kind: DaemonSet
 metadata:
   name: systemd-exporter
   labels:
-    name: systemd-exporter
+    app.kubernetes.io/name: systemd-exporter
 spec:
   selector:
     matchLabels:
-      k8s-app: systemd-exporter
+      app.kubernetes.io/name: systemd-exporter
   updateStrategy:
     rollingUpdate:
       maxUnavailable: 100%
@@ -15,24 +15,21 @@ spec:
   template:
     metadata:
       labels:
-        k8s-app: systemd-exporter
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/path: "/metrics"
-        prometheus.io/port: "9558"
+        app.kubernetes.io/name: systemd-exporter
     spec:
       securityContext:
         runAsUser: 0
       hostPID: true
+      hostNetwork: true
       containers:
       - name: systemd-exporter
-        image: quay.io/prometheuscommunity/systemd-exporter:master
+        image: prometheuscommunity/systemd-exporter
         securityContext:
           privileged: true
         args:
         - --log.level=info
         - --path.procfs=/host/proc
-        - --collector.unit-whitelist=kubelet.service|docker.service
+        - --systemd.collector.unit-include=kubelet.service|docker.service|containerd.service
         ports:
         - name: metrics
           containerPort: 9558

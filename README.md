@@ -65,7 +65,7 @@ Take a look at `examples` for daemonset manifests for Kubernetes.
 
 # User privilleges
 
-User needs to access systemd dbus, typically exporter needs to see node's `/proc`, `/sys/fs/cgroup` to work.
+User needs to access systemd dbus, typically exporter needs to see node's `/proc` to work.
 
 # Metrics
 

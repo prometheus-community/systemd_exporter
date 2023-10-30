@@ -31,8 +31,7 @@ spec:
           privileged: true
         args:
         - --log.level=info
-        - --path.procfs=/host/proc
-        - --collector.unit-whitelist=kubelet.service|docker.service
+        - --collector.unit-include=kubelet.service|docker.service
         ports:
         - name: metrics
           containerPort: 9558

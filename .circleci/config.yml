@@ -9,7 +9,7 @@ executors:
   # also be updated.
   golang:
     docker:
-      - image: cimg/go:1.20
+      - image: cimg/go:1.21
 
 jobs:
   test:
@@ -21,46 +21,6 @@ jobs:
       - prometheus/store_artifact:
           file: systemd_exporter
 
-  codespell:
-    docker:
-      - image: cimg/python:3.11
-
-    steps:
-      - checkout
-      - run: pip install codespell
-      - run: codespell --skip=".git,./vendor,ttar,go.mod,go.sum,*pem" -L uint,packages\',uptodate
-
-  build:
-    machine:
-      image: ubuntu-2204:current
-
-    environment:
-      DOCKER_TEST_IMAGE_NAME: quay.io/prometheus/golang-builder:1.18-base
-      REPO_PATH: github.com/prometheus-community/systemd_exporter
-
-    steps:
-      - checkout
-      - run: docker run --privileged linuxkit/binfmt:v0.8
-      - run: make promu
-      - run: promu crossbuild
-      - run: promu --config .promu.yml crossbuild
-      - persist_to_workspace:
-          root: .
-          paths:
-            - .build
-      - store_artifacts:
-          path: .build
-          destination: /build
-      - run:
-          command: |
-            if [ -n "$CIRCLE_TAG" ]; then
-              make docker DOCKER_IMAGE_TAG=$CIRCLE_TAG
-            else
-              make docker
-            fi
-      - run: docker images
-      - run: docker run --rm -t -v "$(pwd):/app" "${DOCKER_TEST_IMAGE_NAME}" -i "${REPO_PATH}" -T
-
 workflows:
   version: 2
   systemd_exporter:
@@ -69,11 +29,8 @@ workflows:
           filters:
             tags:
               only: /.*/
-      - build:
-          filters:
-            tags:
-              only: /.*/
-      - codespell:
+      - prometheus/build:
+          name: build
           filters:
             tags:
               only: /.*/

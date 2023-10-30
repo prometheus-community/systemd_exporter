@@ -1,5 +1,11 @@
 ## main / unreleased
 
+## 0.6.0 / 2023-10-30
+
+* [CHANGE] Remove broken metrics collection #68
+* [CHANGE] Remove use of cgroups #105
+* [FEATURE] Add unit timestamp metrics #58
+
 ## 0.5.0 / 2022-07-20
 
 Now released under the Prometheus Community

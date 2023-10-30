@@ -289,7 +289,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 	logger := log.With(c.logger, "unit", unit.Name)
 
 	// Collect unit_state for all
-	err := c.collectUnitState(conn, ch, unit)
+	err := c.collectUnitState(ch, unit)
 	if err != nil {
 		level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
 		// TODO should we continue processing here?
@@ -352,7 +352,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 	return nil
 }
 
-func (c *Collector) collectUnitState(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectUnitState(ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	// TODO: wrap GetUnitTypePropertyString(
 	// serviceTypeProperty, err := conn.GetUnitTypeProperty(unit.Name, "Timer", "NextElapseUSecMonotonic")
 

@@ -35,6 +35,7 @@ import (
 )
 
 const namespace = "systemd"
+const watchdogSubsystem = "watchdog"
 
 var (
 	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
@@ -81,6 +82,10 @@ type Collector struct {
 	ipEgressBytes                 *prometheus.Desc
 	ipIngressPackets              *prometheus.Desc
 	ipEgressPackets               *prometheus.Desc
+	watchdogEnabled               *prometheus.Desc
+	watchdogLastPingMonotonic     *prometheus.Desc
+	watchdogLastPingTimestamp     *prometheus.Desc
+	watchdogRuntimeSeconds        *prometheus.Desc
 
 	unitIncludePattern *regexp.Regexp
 	unitExcludePattern *regexp.Regexp
@@ -198,6 +203,26 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		"Service unit egress IP accounting in packets.",
 		[]string{"name"}, nil,
 	)
+	watchdogEnabled := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, watchdogSubsystem, "enabled"),
+		"systemd watchdog enabled",
+		nil, nil,
+	)
+	watchdogLastPingMonotonic := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, watchdogSubsystem, "last_ping_monotonic_seconds"),
+		"systemd watchdog last ping monotonic seconds",
+		[]string{"device"}, nil,
+	)
+	watchdogLastPingTimestamp := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, watchdogSubsystem, "last_ping_time_seconds"),
+		"systemd watchdog last ping time seconds",
+		[]string{"device"}, nil,
+	)
+	watchdogRuntimeSeconds := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, watchdogSubsystem, "runtime_seconds"),
+		"systemd watchdog runtime seconds",
+		[]string{"device"}, nil,
+	)
 	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
 	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
 
@@ -229,6 +254,10 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		ipEgressPackets:               ipEgressPackets,
 		unitIncludePattern:            unitIncludePattern,
 		unitExcludePattern:            unitExcludePattern,
+		watchdogEnabled:               watchdogEnabled,
+		watchdogLastPingMonotonic:     watchdogLastPingMonotonic,
+		watchdogLastPingTimestamp:     watchdogLastPingTimestamp,
+		watchdogRuntimeSeconds:        watchdogRuntimeSeconds,
 	}, nil
 }
 
@@ -259,7 +288,10 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
 	desc <- c.ipEgressPackets
-
+	desc <- c.watchdogEnabled
+	desc <- c.watchdogLastPingMonotonic
+	desc <- c.watchdogLastPingTimestamp
+	desc <- c.watchdogRuntimeSeconds
 }
 
 func parseUnitType(unit dbus.UnitStatus) string {
@@ -278,6 +310,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	err = c.collectBootStageTimestamps(conn, ch)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "Failed to collect boot stage timestamps", "err", err)
+	}
+
+	err = c.collectWatchdogMetrics(conn, ch)
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "Failed to collect watchdog metrics", "err", err)
 	}
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
@@ -687,4 +724,70 @@ func (c *Collector) filterUnits(units []dbus.UnitStatus, includePattern, exclude
 	}
 
 	return filtered
+}
+
+func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
+	watchdogDevice, err := conn.GetManagerProperty("WatchdogDevice")
+	if err != nil {
+		return err
+	}
+
+	watchdogDeviceString := strings.TrimPrefix(strings.TrimSuffix(watchdogDevice, `"`), `"`)
+
+	if len(watchdogDeviceString) == 0 {
+		ch <- prometheus.MustNewConstMetric(
+			c.watchdogEnabled, prometheus.GaugeValue,
+			0)
+
+		level.Debug(c.logger).Log("msg", "No watchdog configured, ignoring metrics")
+		return nil
+	}
+
+	watchdogLastPingMonotonicProperty, err := conn.GetManagerProperty("WatchdogLastPingTimestampMonotonic")
+	if err != nil {
+		return err
+	}
+
+	watchdogLastPingTimeProperty, err := conn.GetManagerProperty("WatchdogLastPingTimestamp")
+	if err != nil {
+		return err
+	}
+
+	runtimeWatchdogUSecProperty, err := conn.GetManagerProperty("RuntimeWatchdogUSec")
+	if err != nil {
+		return err
+	}
+
+	watchdogLastPingMonotonic, err := strconv.ParseFloat(strings.TrimLeft(watchdogLastPingMonotonicProperty, "@t "), 64)
+	if err != nil {
+		return err
+	}
+
+	watchdogLastPingTimestamp, err := strconv.ParseFloat(strings.TrimLeft(watchdogLastPingTimeProperty, "@t "), 64)
+	if err != nil {
+		return err
+	}
+
+	runtimeWatchdogUSec, err := strconv.ParseFloat(strings.TrimLeft(runtimeWatchdogUSecProperty, "@t "), 64)
+	if err != nil {
+		return err
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.watchdogEnabled, prometheus.GaugeValue,
+		1)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.watchdogLastPingMonotonic, prometheus.GaugeValue,
+		float64(watchdogLastPingMonotonic)/1e6, watchdogDeviceString)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.watchdogLastPingTimestamp, prometheus.GaugeValue,
+		float64(watchdogLastPingTimestamp)/1e6, watchdogDeviceString)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.watchdogRuntimeSeconds, prometheus.GaugeValue,
+		float64(runtimeWatchdogUSec)/1e6, watchdogDeviceString)
+
+	return nil
 }

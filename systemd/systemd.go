@@ -58,6 +58,7 @@ var (
 type Collector struct {
 	ctx                           context.Context
 	logger                        log.Logger
+	systemdVersion                *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -84,6 +85,11 @@ type Collector struct {
 
 // NewCollector returns a new Collector exposing systemd statistics.
 func NewCollector(logger log.Logger) (*Collector, error) {
+	systemdVersion := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "version"),
+		"systemd version",
+		[]string{"version"}, nil,
+	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
 	unitState := prometheus.NewDesc(
@@ -194,6 +200,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	return &Collector{
 		ctx:                           ctx,
 		logger:                        logger,
+		systemdVersion:                systemdVersion,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -228,6 +235,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 // Describe gathers descriptions of Metrics
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
+	desc <- c.systemdVersion
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -258,6 +266,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return errors.Wrapf(err, "couldn't get dbus connection")
 	}
 	defer conn.Close()
+
+	systemdVersion := c.getSystemdVersion(conn)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.systemdVersion,
+		prometheus.GaugeValue,
+		1,
+		systemdVersion,
+	)
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
@@ -619,4 +636,18 @@ func (c *Collector) filterUnits(units []dbus.UnitStatus, includePattern, exclude
 	}
 
 	return filtered
+}
+
+func (c *Collector) getSystemdVersion(conn *dbus.Conn) string {
+	version, err := conn.GetManagerProperty("Version")
+
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "Unable to get systemd version property, defaulting to 0")
+		return "0"
+	}
+
+	version = strings.TrimPrefix(strings.TrimSuffix(version, `"`), `"`)
+	level.Debug(c.logger).Log("msg", "Got systemd version", "version", version)
+
+	return version
 }

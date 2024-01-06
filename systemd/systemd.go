@@ -31,8 +31,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-
-	godbus "github.com/godbus/dbus/v5"
 )
 
 const namespace = "systemd"
@@ -245,23 +243,12 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
 	desc <- c.ipEgressPackets
+
 }
 
 func parseUnitType(unit dbus.UnitStatus) string {
 	t := strings.Split(unit.Name, ".")
 	return t[len(t)-1]
-}
-
-func parseProperty(object godbus.BusObject, path string) (ret []float64, err error) {
-	variant, err := object.GetProperty(path)
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range variant.Value().([]interface{}) {
-		i := v.(uint64)
-		ret = append(ret, float64(i))
-	}
-	return ret, err
 }
 
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
@@ -295,7 +282,6 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 
 	wg.Wait()
-
 	return nil
 }
 

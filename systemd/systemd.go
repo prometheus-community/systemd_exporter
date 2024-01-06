@@ -44,7 +44,6 @@ var (
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
-	enableResolvedgMetrics    = kingpin.Flag("systemd.collector.enable-resolved", "Enable systemd-resolved statistics").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -83,16 +82,6 @@ type Collector struct {
 
 	unitIncludePattern *regexp.Regexp
 	unitExcludePattern *regexp.Regexp
-
-	resolvedCurrentTransactions *prometheus.Desc
-	resolvedTotalTransactions   *prometheus.Desc
-	resolvedCurrentCacheSize    *prometheus.Desc
-	resolvedTotalCacheHits      *prometheus.Desc
-	resolvedTotalCacheMisses    *prometheus.Desc
-	resolvedTotalSecure         *prometheus.Desc
-	resolvedTotalInsecure       *prometheus.Desc
-	resolvedTotalBogus          *prometheus.Desc
-	resolvedTotalIndeterminate  *prometheus.Desc
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
@@ -202,53 +191,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
 	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
 
-	// resolved metrics
-	resolvedCurrentTransactions := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_current_transactions"),
-		"Resolved Current Transactions",
-		nil, nil,
-	)
-	resolvedTotalTransactions := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_transactions_total"),
-		"Resolved Total Transactions",
-		nil, nil,
-	)
-	resolvedCurrentCacheSize := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_current_cache_size"),
-		"Resolved Current Cache Size",
-		nil, nil,
-	)
-	resolvedTotalCacheHits := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_cache_hits_total"),
-		"Resolved Total Cache Hits",
-		nil, nil,
-	)
-	resolvedTotalCacheMisses := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_cache_misses_total"),
-		"Resolved Total Cache Misses",
-		nil, nil,
-	)
-	resolvedTotalSecure := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_dnssec_secure_total"),
-		"Resolved Total number of DNSSEC Verdicts Secure",
-		nil, nil,
-	)
-	resolvedTotalInsecure := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_dnssec_insecure_total"),
-		"Resolved Total number of DNSSEC Verdicts Insecure",
-		nil, nil,
-	)
-	resolvedTotalBogus := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_dnssec_bogus_total"),
-		"Resolved Total number of DNSSEC Verdicts Boguss",
-		nil, nil,
-	)
-	resolvedTotalIndeterminate := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "resolved_dnssec_indeterminate_total"),
-		"Resolved Total number of DNSSEC Verdicts Indeterminat",
-		nil, nil,
-	)
-
 	// TODO: Build a custom handler to pass in the scrape http context.
 	ctx := context.TODO()
 	return &Collector{
@@ -275,16 +217,6 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		ipEgressPackets:               ipEgressPackets,
 		unitIncludePattern:            unitIncludePattern,
 		unitExcludePattern:            unitExcludePattern,
-
-		resolvedCurrentTransactions: resolvedCurrentTransactions,
-		resolvedTotalTransactions:   resolvedTotalTransactions,
-		resolvedCurrentCacheSize:    resolvedCurrentCacheSize,
-		resolvedTotalCacheHits:      resolvedTotalCacheHits,
-		resolvedTotalCacheMisses:    resolvedTotalCacheMisses,
-		resolvedTotalSecure:         resolvedTotalSecure,
-		resolvedTotalInsecure:       resolvedTotalInsecure,
-		resolvedTotalBogus:          resolvedTotalBogus,
-		resolvedTotalIndeterminate:  resolvedTotalIndeterminate,
 	}, nil
 }
 
@@ -313,16 +245,6 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
 	desc <- c.ipEgressPackets
-	desc <- c.resolvedCurrentTransactions
-	desc <- c.resolvedTotalTransactions
-	desc <- c.resolvedCurrentCacheSize
-	desc <- c.resolvedTotalCacheHits
-	desc <- c.resolvedTotalCacheMisses
-	desc <- c.resolvedTotalSecure
-	desc <- c.resolvedTotalInsecure
-	desc <- c.resolvedTotalBogus
-	desc <- c.resolvedTotalIndeterminate
-
 }
 
 func parseUnitType(unit dbus.UnitStatus) string {
@@ -373,13 +295,6 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 
 	wg.Wait()
-
-	if *enableResolvedgMetrics {
-		err := c.collectResolvedMetrics(ch)
-		if err != nil {
-			level.Warn(c.logger).Log("msg", "couldn't get resolved metrics", "err", err)
-		}
-	}
 
 	return nil
 }
@@ -690,53 +605,6 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 	ch <- prometheus.MustNewConstMetric(
 		c.timerLastTriggerDesc, prometheus.GaugeValue,
 		float64(val)/1e6, unit.Name)
-	return nil
-}
-
-func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
-
-	conn, err := godbus.ConnectSystemBus()
-	if err != nil {
-		return err
-	}
-
-	defer conn.Close()
-
-	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
-
-	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
-	if err != nil {
-		return err
-	}
-
-	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentCacheSize, prometheus.GaugeValue,
-		float64(cacheStats[0]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheHits, prometheus.CounterValue,
-		float64(cacheStats[1]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheMisses, prometheus.CounterValue,
-		float64(cacheStats[2]))
-
-	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
-	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentTransactions, prometheus.GaugeValue,
-		float64(transactionStats[0]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalTransactions, prometheus.CounterValue,
-		float64(transactionStats[1]))
-	if err != nil {
-		return err
-	}
-
-	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalSecure, prometheus.CounterValue,
-		float64(dnssecStats[0]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalInsecure, prometheus.CounterValue,
-		float64(dnssecStats[1]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalBogus, prometheus.CounterValue,
-		float64(dnssecStats[2]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalIndeterminate, prometheus.CounterValue,
-		float64(dnssecStats[3]))
-	if err != nil {
-		return err
-	}
 	return nil
 }
 

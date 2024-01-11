@@ -21,6 +21,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/systemd_exporter/systemd"
+	"github.com/prometheus-community/systemd_exporter/systemd/resolved"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/promlog"
@@ -44,6 +45,8 @@ func main() {
 			"web.max-requests",
 			"Maximum number of parallel scrape requests. Use 0 to disable.",
 		).Default("40").Int()
+		enableResolvedgMetrics = kingpin.Flag("systemd.collector.enable-resolved", "Enable systemd-resolved statistics").Bool()
+
 		toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
 	)
 
@@ -85,6 +88,18 @@ func main() {
 		handler = promhttp.InstrumentMetricHandler(
 			exporterMetricsRegistry, handler,
 		)
+	}
+	if *enableResolvedgMetrics {
+		resolvedCollector, err := resolved.NewCollector(logger)
+		if err != nil {
+			level.Error(logger).Log("msg", "Couldn't create resolved collector", "err", err)
+			os.Exit(1)
+		}
+
+		if err := r.Register(resolvedCollector); err != nil {
+			level.Error(logger).Log("msg", "Couldn't register resolved collector", "err", err)
+			os.Exit(1)
+		}
 	}
 
 	http.Handle(*metricsPath, handler)

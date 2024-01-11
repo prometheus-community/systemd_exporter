@@ -61,7 +61,13 @@ Of note, there is no customized support for `.snapshot` (removed in systemd v228
 
 # Deployment
 
-Take a look at `examples` for daemonset manifests for Kubernetes.
+To install this exporter, either:
+
+ * Clone this Git repository and run `go build`.
+ * Use one of the prebuilt binaries from the [releases page](https://github.com/prometheus-community/systemd_exporter/releases/).
+ * Use the [Ansible systemd_exporter role](https://prometheus-community.github.io/ansible/branch/main/systemd_exporter_role.html).
+ * On NixOS, use the [services.prometheus.exporters.systemd module](https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/services/monitoring/prometheus/exporters.nix).
+ * Take a look at `examples` for daemonset manifests for Kubernetes.
 
 # User privilleges
 

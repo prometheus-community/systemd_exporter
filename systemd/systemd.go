@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
@@ -42,6 +43,7 @@ var (
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	bootTimeRE                = regexp.MustCompile(`\d+`)
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -58,6 +60,8 @@ var (
 type Collector struct {
 	ctx                           context.Context
 	logger                        log.Logger
+	systemdBootMonotonic          *prometheus.Desc
+	systemdBootTime               *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -84,6 +88,14 @@ type Collector struct {
 
 // NewCollector returns a new Collector exposing systemd statistics.
 func NewCollector(logger log.Logger) (*Collector, error) {
+	systemdBootMonotonic := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "boot_monotonic_seconds"),
+		"Systemd boot stage monotonic timestamps", []string{"stage"}, nil,
+	)
+	systemdBootTime := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
+		"Systemd boot stage timestamps", []string{"stage"}, nil,
+	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
 	unitState := prometheus.NewDesc(
@@ -194,6 +206,8 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	return &Collector{
 		ctx:                           ctx,
 		logger:                        logger,
+		systemdBootMonotonic:          systemdBootMonotonic,
+		systemdBootTime:               systemdBootTime,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -228,6 +242,8 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 // Describe gathers descriptions of Metrics
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
+	desc <- c.systemdBootMonotonic
+	desc <- c.systemdBootTime
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -259,6 +275,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 	defer conn.Close()
 
+	err = c.collectBootStageTimestamps(conn, ch)
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "Failed to collect boot stage timestamps", "err", err)
+	}
+
 	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
 		return errors.Wrap(err, "could not get list of systemd units from dbus")
@@ -282,6 +303,53 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 
 	wg.Wait()
+	return nil
+}
+
+func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
+	stages := []string{"Finish", "Firmware", "Loader", "Kernel", "InitRD",
+		"InitRDGeneratorsStart", "InitRDGeneratorsFinish",
+		"InitRDSecurityStart", "InitRDSecurityFinish",
+		"InitRDUnitsLoadStart", "InitRDUnitsLoadFinish",
+		"GeneratorsStart", "GeneratorsFinish",
+		"SecurityStart", "SecurityFinish", "Userspace",
+		"UnitsLoadStart", "UnitsLoadFinish"}
+
+	for _, stage := range stages {
+		stageMonotonicValue, err := conn.GetManagerProperty(fmt.Sprintf("%sTimestampMonotonic", stage))
+		if err != nil {
+			return err
+		}
+
+		stageTimestampValue, err := conn.GetManagerProperty(fmt.Sprintf("%sTimestamp", stage))
+		if err != nil {
+			return err
+		}
+
+		stageMonotonic := strings.TrimPrefix(strings.TrimSuffix(stageMonotonicValue, `"`), `"`)
+		stageTimestamp := strings.TrimPrefix(strings.TrimSuffix(stageTimestampValue, `"`), `"`)
+
+		parsedStageMonotonic := bootTimeRE.FindString(stageMonotonic)
+		parsedStageTime := bootTimeRE.FindString(stageTimestamp)
+
+		vMonotonic, err := strconv.ParseFloat(parsedStageMonotonic, 64)
+		if err != nil {
+			return err
+		}
+
+		vTimestamp, err := strconv.ParseFloat(parsedStageTime, 64)
+		if err != nil {
+			return err
+		}
+
+		ch <- prometheus.MustNewConstMetric(
+			c.systemdBootMonotonic, prometheus.GaugeValue, float64(vMonotonic)/1e6,
+			stage)
+		ch <- prometheus.MustNewConstMetric(
+			c.systemdBootTime, prometheus.GaugeValue, float64(vTimestamp)/1e6,
+			stage)
+	}
+
 	return nil
 }
 

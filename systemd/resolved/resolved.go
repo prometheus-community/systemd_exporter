@@ -22,7 +22,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const namespace = "systemd_resolved"
+const (
+	namespace = "systemd"
+	subsystem = "resolved"
+)
 
 type Collector struct {
 	ctx    context.Context
@@ -31,47 +34,47 @@ type Collector struct {
 
 var (
 	resolvedCurrentTransactions = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "current_transactions"),
+		prometheus.BuildFQName(namespace, subsystem, "current_transactions"),
 		"Resolved Current Transactions",
 		nil, nil,
 	)
 	resolvedTotalTransactions = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "transactions_total"),
+		prometheus.BuildFQName(namespace, subsystem, "transactions_total"),
 		"Resolved Total Transactions",
 		nil, nil,
 	)
 	resolvedCurrentCacheSize = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "current_cache_size"),
+		prometheus.BuildFQName(namespace, subsystem, "current_cache_size"),
 		"Resolved Current Cache Size",
 		nil, nil,
 	)
 	resolvedTotalCacheHits = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "cache_hits_total"),
+		prometheus.BuildFQName(namespace, subsystem, "cache_hits_total"),
 		"Resolved Total Cache Hits",
 		nil, nil,
 	)
 	resolvedTotalCacheMisses = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "cache_misses_total"),
+		prometheus.BuildFQName(namespace, subsystem, "cache_misses_total"),
 		"Resolved Total Cache Misses",
 		nil, nil,
 	)
 	resolvedTotalSecure = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "dnssec_secure_total"),
+		prometheus.BuildFQName(namespace, subsystem, "dnssec_secure_total"),
 		"Resolved Total number of DNSSEC Verdicts Secure",
 		nil, nil,
 	)
 	resolvedTotalInsecure = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "dnssec_insecure_total"),
+		prometheus.BuildFQName(namespace, subsystem, "dnssec_insecure_total"),
 		"Resolved Total number of DNSSEC Verdicts Insecure",
 		nil, nil,
 	)
 	resolvedTotalBogus = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "dnssec_bogus_total"),
+		prometheus.BuildFQName(namespace, subsystem, "dnssec_bogus_total"),
 		"Resolved Total number of DNSSEC Verdicts Boguss",
 		nil, nil,
 	)
 	resolvedTotalIndeterminate = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "dnssec_indeterminate_total"),
+		prometheus.BuildFQName(namespace, subsystem, "dnssec_indeterminate_total"),
 		"Resolved Total number of DNSSEC Verdicts Indeterminat",
 		nil, nil,
 	)

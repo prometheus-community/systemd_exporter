@@ -22,11 +22,11 @@ import (
 	"github.com/prometheus-community/systemd_exporter/systemd"
 	"github.com/prometheus-community/systemd_exporter/systemd/resolved"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors/version"
+	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/promslog"
 	"github.com/prometheus/common/promslog/flag"
-	commonVersion "github.com/prometheus/common/version"
+	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	webflag "github.com/prometheus/exporter-toolkit/web/kingpinflag"
 )
@@ -52,18 +52,18 @@ func main() {
 
 	promslogConfig := &promslog.Config{}
 	flag.AddFlags(kingpin.CommandLine, promslogConfig)
-	kingpin.Version(commonVersion.Print("systemd_exporter"))
+	kingpin.Version(version.Print("systemd_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 	logger := promslog.New(promslogConfig)
 
-	logger.Info("Starting systemd_exporter", "version", commonVersion.Info())
-	logger.Info("Build context", "build_context", commonVersion.BuildContext())
+	logger.Info("Starting systemd_exporter", "version", version.Info())
+	logger.Info("Build context", "build_context", version.BuildContext())
 
 	exporterMetricsRegistry := prometheus.NewRegistry()
 	r := prometheus.NewRegistry()
 
-	r.MustRegister(version.NewCollector("systemd_exporter"))
+	r.MustRegister(versioncollector.NewCollector("systemd_exporter"))
 
 	collector, err := systemd.NewCollector(logger)
 	if err != nil {
@@ -107,7 +107,7 @@ func main() {
 		landingConfig := web.LandingConfig{
 			Name:        "systemd Exporter",
 			Description: "Prometheus Exporter for systemd",
-			Version:     commonVersion.Info(),
+			Version:     version.Info(),
 			Links: []web.LandingLinks{
 				{
 					Address: *metricsPath,

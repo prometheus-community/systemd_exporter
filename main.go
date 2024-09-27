@@ -19,14 +19,14 @@ import (
 	"os"
 
 	"github.com/alecthomas/kingpin/v2"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/systemd_exporter/systemd"
 	"github.com/prometheus-community/systemd_exporter/systemd/resolved"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/promlog"
-	"github.com/prometheus/common/promlog/flag"
-	"github.com/prometheus/common/version"
+	"github.com/prometheus/common/promslog"
+	"github.com/prometheus/common/promslog/flag"
+	commonVersion "github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	webflag "github.com/prometheus/exporter-toolkit/web/kingpinflag"
 )
@@ -50,15 +50,15 @@ func main() {
 		toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
 	)
 
-	promlogConfig := &promlog.Config{}
-	flag.AddFlags(kingpin.CommandLine, promlogConfig)
-	kingpin.Version(version.Print("systemd_exporter"))
+	promslogConfig := &promslog.Config{}
+	flag.AddFlags(kingpin.CommandLine, promslogConfig)
+	kingpin.Version(commonVersion.Print("systemd_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
-	logger := promlog.New(promlogConfig)
+	logger := promslog.New(promslogConfig)
 
-	level.Info(logger).Log("msg", "Starting systemd_exporter", "version", version.Info())
-	level.Info(logger).Log("msg", "Build context", "build_context", version.BuildContext())
+	logger.Info("Starting systemd_exporter", "version", commonVersion.Info())
+	logger.Info("Build context", "build_context", commonVersion.BuildContext())
 
 	exporterMetricsRegistry := prometheus.NewRegistry()
 	r := prometheus.NewRegistry()
@@ -67,12 +67,12 @@ func main() {
 
 	collector, err := systemd.NewCollector(logger)
 	if err != nil {
-		level.Error(logger).Log("msg", "Couldn't create collector", "err", err)
+		logger.Error("Couldn't create collector", "err", err)
 		os.Exit(1)
 	}
 
 	if err := r.Register(collector); err != nil {
-		level.Error(logger).Log("msg", "Couldn't register systemd collector", "err", err)
+		logger.Error("Couldn't register systemd collector", "err", err)
 		os.Exit(1)
 	}
 
@@ -92,12 +92,12 @@ func main() {
 	if *enableResolvedgMetrics {
 		resolvedCollector, err := resolved.NewCollector(logger)
 		if err != nil {
-			level.Error(logger).Log("msg", "Couldn't create resolved collector", "err", err)
+			logger.Error("Couldn't create resolved collector", "err", err)
 			os.Exit(1)
 		}
 
 		if err := r.Register(resolvedCollector); err != nil {
-			level.Error(logger).Log("msg", "Couldn't register resolved collector", "err", err)
+			logger.Error("Couldn't register resolved collector", "err", err)
 			os.Exit(1)
 		}
 	}
@@ -107,7 +107,7 @@ func main() {
 		landingConfig := web.LandingConfig{
 			Name:        "systemd Exporter",
 			Description: "Prometheus Exporter for systemd",
-			Version:     version.Info(),
+			Version:     commonVersion.Info(),
 			Links: []web.LandingLinks{
 				{
 					Address: *metricsPath,
@@ -117,7 +117,7 @@ func main() {
 		}
 		landingPage, err := web.NewLandingPage(landingConfig)
 		if err != nil {
-			level.Error(logger).Log("err", err)
+			logger.Error("Couldn't create landing page", "err", err.Error())
 			os.Exit(1)
 		}
 		http.Handle("/", landingPage)
@@ -125,7 +125,7 @@ func main() {
 
 	srv := &http.Server{}
 	if err := web.ListenAndServe(srv, toolkitFlags, logger); err != nil {
-		level.Error(logger).Log("err", err)
+		logger.Error("Error starting server", "err", err)
 		os.Exit(1)
 	}
 }

@@ -15,9 +15,8 @@ package resolved
 
 import (
 	"context"
+	"log/slog"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/godbus/dbus/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -29,7 +28,7 @@ const (
 
 type Collector struct {
 	ctx    context.Context
-	logger log.Logger
+	logger *slog.Logger
 }
 
 var (
@@ -81,7 +80,7 @@ var (
 )
 
 // NewCollector returns a new Collector exporing resolved statistics
-func NewCollector(logger log.Logger) (*Collector, error) {
+func NewCollector(logger *slog.Logger) (*Collector, error) {
 
 	ctx := context.TODO()
 	return &Collector{
@@ -94,8 +93,8 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	err := c.collect(ch)
 	if err != nil {
-		level.Error(c.logger).Log("msg", "error collecting resolved metrics",
-			"err", err)
+		c.logger.Error("error collecting resolved metrics",
+			"err", err.Error())
 	}
 }
 

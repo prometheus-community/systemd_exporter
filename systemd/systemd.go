@@ -16,6 +16,7 @@ package systemd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 
@@ -28,8 +29,6 @@ import (
 
 	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/coreos/go-systemd/v22/dbus"
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -59,7 +58,7 @@ var (
 
 type Collector struct {
 	ctx                           context.Context
-	logger                        log.Logger
+	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
@@ -91,7 +90,7 @@ type Collector struct {
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
-func NewCollector(logger log.Logger) (*Collector, error) {
+func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootMonotonic := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_monotonic_seconds"),
 		"Systemd boot stage monotonic timestamps", []string{"stage"}, nil,
@@ -264,7 +263,7 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	err := c.collect(ch)
 	if err != nil {
-		level.Error(c.logger).Log("msg", "error collecting metrics", "err", err)
+		c.logger.Error("error collecting metrics", "err", err.Error())
 	}
 }
 
@@ -308,12 +307,12 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	err = c.collectBootStageTimestamps(conn, ch)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "Failed to collect boot stage timestamps", "err", err)
+		c.logger.Debug("Failed to collect boot stage timestamps", "err", err.Error())
 	}
 
 	err = c.collectWatchdogMetrics(conn, ch)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "Failed to collect watchdog metrics", "err", err)
+		c.logger.Debug("Failed to collect watchdog metrics", "err", err.Error())
 	}
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
@@ -321,10 +320,10 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return errors.Wrap(err, "could not get list of systemd units from dbus")
 	}
 
-	level.Debug(c.logger).Log("msg", "systemd ListUnits took", "seconds", time.Since(begin).Seconds())
+	c.logger.Debug("systemd ListUnits took", "seconds", time.Since(begin).Seconds())
 	begin = time.Now()
 	units := c.filterUnits(allUnits, c.unitIncludePattern, c.unitExcludePattern)
-	level.Debug(c.logger).Log("msg", "systemd filterUnits took", "seconds", time.Since(begin).Seconds())
+	c.logger.Debug("systemd filterUnits took", "seconds", time.Since(begin).Seconds())
 
 	var wg sync.WaitGroup
 	wg.Add(len(units))
@@ -332,7 +331,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		go func(unit dbus.UnitStatus) {
 			err := c.collectUnit(conn, ch, unit)
 			if err != nil {
-				level.Warn(c.logger).Log("msg", errUnitMetricsMsg, "err", err)
+				c.logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 			wg.Done()
 		}(unit)
@@ -387,67 +386,67 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	logger := log.With(c.logger, "unit", unit.Name)
+	logger := c.logger.With("unit", unit.Name)
 
 	// Collect unit_state for all
 	err := c.collectUnitState(ch, unit)
 	if err != nil {
-		level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+		logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		// TODO should we continue processing here?
 	}
 
 	err = c.collectUnitTimeMetrics(conn, ch, unit)
 	if err != nil {
-		level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+		logger.Warn(errUnitMetricsMsg, "err", err.Error())
 	}
 
 	switch {
 	case strings.HasSuffix(unit.Name, ".service"):
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
 		err = c.collectServiceStartTimeMetrics(conn, ch, unit)
 		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
 		if *enableRestartsMetrics {
 			err = c.collectServiceRestartCount(conn, ch, unit)
 			if err != nil {
-				level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
 
 		err = c.collectServiceTasksMetrics(conn, ch, unit)
 		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
 		if *enableIPAccountingMetrics {
 			err = c.collectIPAccountingMetrics(conn, ch, unit)
 			if err != nil {
-				level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
 	case strings.HasSuffix(unit.Name, ".mount"):
 		err = c.collectMountMetainfo(conn, ch, unit)
 		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 	case strings.HasSuffix(unit.Name, ".timer"):
 		err := c.collectTimerTriggerTime(conn, ch, unit)
 		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 	case strings.HasSuffix(unit.Name, ".socket"):
 		err := c.collectSocketConnMetrics(conn, ch, unit)
 		if err != nil {
-			level.Warn(logger).Log("msg", errUnitMetricsMsg, "err", err)
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 	default:
-		level.Debug(c.logger).Log("msg", infoUnitNoHandler, unit.Name)
+		logger.Debug(infoUnitNoHandler, "unit", unit.Name)
 	}
 
 	return nil
@@ -712,10 +711,10 @@ func (c *Collector) filterUnits(units []dbus.UnitStatus, includePattern, exclude
 			!excludePattern.MatchString(unit.Name) &&
 			unit.LoadState == "loaded" {
 
-			level.Debug(c.logger).Log("msg", "Adding unit", "unit", unit.Name)
+			c.logger.Debug("Adding unit", "unit", unit.Name)
 			filtered = append(filtered, unit)
 		} else {
-			level.Debug(c.logger).Log("msg", "Ignoring unit", "unit", unit.Name)
+			c.logger.Debug("Ignoring unit", "unit", unit.Name)
 		}
 	}
 
@@ -735,7 +734,7 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 			c.watchdogEnabled, prometheus.GaugeValue,
 			0)
 
-		level.Debug(c.logger).Log("msg", "No watchdog configured, ignoring metrics")
+		c.logger.Debug("No watchdog configured, ignoring metrics")
 		return nil
 	}
 

@@ -1,5 +1,13 @@
 ## main / unreleased
 
+## 0.7.0 / 2025-03-14
+
+* [CHANGE] Used TrimLeft instead of regex for boot times metrics #124
+* [CHANGE] Switch logging to slog #142
+* [FEATURE] Add boot stage timestamp collector #110
+* [FEATURE] Add watchdog metrics #111
+* [FEATURE] Add systemd-resolved metrics collector #119
+
 ## 0.6.0 / 2023-10-30
 
 * [CHANGE] Remove broken metrics collection #68

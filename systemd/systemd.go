@@ -29,7 +29,6 @@ import (
 
 	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/coreos/go-systemd/v22/dbus"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -48,7 +47,7 @@ var (
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
 
 var (
-	errGetPropertyMsg           = "couldn't get unit's %s property"
+	errGetPropertyMsg           = "couldn't get unit's %s property: %w"
 	errConvertUint64PropertyMsg = "couldn't convert unit's %s property %v to uint64"
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
@@ -301,7 +300,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
 	if err != nil {
-		return errors.Wrapf(err, "couldn't get dbus connection")
+		return fmt.Errorf("couldn't get dbus connection: %w", err)
 	}
 	defer conn.Close()
 
@@ -317,7 +316,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
-		return errors.Wrap(err, "could not get list of systemd units from dbus")
+		return fmt.Errorf("could not get list of systemd units from dbus: %w", err)
 	}
 
 	c.logger.Debug("systemd ListUnits took", "seconds", time.Since(begin).Seconds())
@@ -493,11 +492,11 @@ func (c *Collector) collectUnitTimeMetrics(conn *dbus.Conn, ch chan<- prometheus
 func (c *Collector) collectUnitTimeMetric(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, desc *prometheus.Desc, propertyName string) error {
 	timestampValue, err := conn.GetUnitPropertyContext(c.ctx, unit.Name, propertyName)
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, propertyName)
+		return fmt.Errorf(errGetPropertyMsg, propertyName, err)
 	}
 	startTimeUsec, ok := timestampValue.Value.Value().(uint64)
 	if !ok {
-		return errors.Errorf(errConvertUint64PropertyMsg, propertyName, timestampValue.Value.Value())
+		return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, timestampValue.Value.Value())
 	}
 
 	ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(startTimeUsec)/1e6, unit.Name, parseUnitType(unit))
@@ -510,12 +509,12 @@ func (c *Collector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.M
 	// TODO: wrap GetUnitTypePropertyString(
 	serviceTypeProperty, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Mount", "Type")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "Type")
+		return fmt.Errorf(errGetPropertyMsg, "Type", err)
 	}
 
 	serviceType, ok := serviceTypeProperty.Value.Value().(string)
 	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "Type", serviceTypeProperty.Value.Value())
+		return fmt.Errorf(errConvertStringPropertyMsg, "Type", serviceTypeProperty.Value.Value())
 	}
 
 	ch <- prometheus.MustNewConstMetric(
@@ -529,11 +528,11 @@ func (c *Collector) collectMountMetainfo(conn *dbus.Conn, ch chan<- prometheus.M
 func (c *Collector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	serviceTypeProperty, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "Type")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "Type")
+		return fmt.Errorf(errGetPropertyMsg, "Type", err)
 	}
 	serviceType, ok := serviceTypeProperty.Value.Value().(string)
 	if !ok {
-		return errors.Errorf(errConvertStringPropertyMsg, "Type", serviceTypeProperty.Value.Value())
+		return fmt.Errorf(errConvertStringPropertyMsg, "Type", serviceTypeProperty.Value.Value())
 	}
 
 	ch <- prometheus.MustNewConstMetric(
@@ -545,11 +544,11 @@ func (c *Collector) collectServiceMetainfo(conn *dbus.Conn, ch chan<- prometheus
 func (c *Collector) collectServiceRestartCount(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	restartsCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "NRestarts")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "NRestarts")
+		return fmt.Errorf(errGetPropertyMsg, "NRestarts", err)
 	}
 	val, ok := restartsCount.Value.Value().(uint32)
 	if !ok {
-		return errors.Errorf(errConvertUint32PropertyMsg, "NRestarts", restartsCount.Value.Value())
+		return fmt.Errorf(errConvertUint32PropertyMsg, "NRestarts", restartsCount.Value.Value())
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.nRestartsDesc, prometheus.CounterValue,
@@ -565,11 +564,11 @@ func (c *Collector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch chan<- pr
 	case "active":
 		timestampValue, err := conn.GetUnitPropertyContext(c.ctx, unit.Name, "ActiveEnterTimestamp")
 		if err != nil {
-			return errors.Wrapf(err, errGetPropertyMsg, "ActiveEnterTimestamp")
+			return fmt.Errorf(errGetPropertyMsg, "ActiveEnterTimestamp", err)
 		}
 		startTime, ok := timestampValue.Value.Value().(uint64)
 		if !ok {
-			return errors.Errorf(errConvertUint64PropertyMsg, "ActiveEnterTimestamp", timestampValue.Value.Value())
+			return fmt.Errorf(errConvertUint64PropertyMsg, "ActiveEnterTimestamp", timestampValue.Value.Value())
 		}
 		startTimeUsec = startTime
 
@@ -587,7 +586,7 @@ func (c *Collector) collectServiceStartTimeMetrics(conn *dbus.Conn, ch chan<- pr
 func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	acceptedConnectionCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Socket", "NAccepted")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "NAccepted")
+		return fmt.Errorf(errGetPropertyMsg, "NAccepted", err)
 	}
 
 	ch <- prometheus.MustNewConstMetric(
@@ -596,7 +595,7 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 
 	currentConnectionCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Socket", "NConnections")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "NConnections")
+		return fmt.Errorf(errGetPropertyMsg, "NConnections", err)
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.socketCurrentConnectionsDesc, prometheus.GaugeValue,
@@ -605,7 +604,7 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 	// NRefused wasn't added until systemd 239.
 	refusedConnectionCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Socket", "NRefused")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "NRefused")
+		return fmt.Errorf(errGetPropertyMsg, "NRefused", err)
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.socketRefusedConnectionsDesc, prometheus.GaugeValue,
@@ -625,12 +624,12 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 	for propertyName, desc := range unitPropertyToPromDesc {
 		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", propertyName)
 		if err != nil {
-			return errors.Wrapf(err, errGetPropertyMsg, propertyName)
+			return fmt.Errorf(errGetPropertyMsg, propertyName, err)
 		}
 
 		counter, ok := property.Value.Value().(uint64)
 		if !ok {
-			return errors.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
+			return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
 		}
 
 		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
@@ -645,12 +644,12 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksCurrent")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "TasksCurrent")
+		return fmt.Errorf(errGetPropertyMsg, "TasksCurrent", err)
 	}
 
 	currentCount, ok := tasksCurrentCount.Value.Value().(uint64)
 	if !ok {
-		return errors.Errorf(errConvertUint64PropertyMsg, "TasksCurrent", tasksCurrentCount.Value.Value())
+		return fmt.Errorf(errConvertUint64PropertyMsg, "TasksCurrent", tasksCurrentCount.Value.Value())
 	}
 
 	// Don't set if tasksCurrent if dbus reports MaxUint64.
@@ -662,12 +661,12 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 
 	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksMax")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "TasksMax")
+		return fmt.Errorf(errGetPropertyMsg, "TasksMax", err)
 	}
 
 	maxCount, ok := tasksMaxCount.Value.Value().(uint64)
 	if !ok {
-		return errors.Errorf(errConvertUint64PropertyMsg, "TasksMax", tasksMaxCount.Value.Value())
+		return fmt.Errorf(errConvertUint64PropertyMsg, "TasksMax", tasksMaxCount.Value.Value())
 	}
 	// Don't set if tasksMax if dbus reports MaxUint64.
 	if maxCount != math.MaxUint64 {
@@ -682,11 +681,11 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	lastTriggerValue, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Timer", "LastTriggerUSec")
 	if err != nil {
-		return errors.Wrapf(err, errGetPropertyMsg, "LastTriggerUSec")
+		return fmt.Errorf(errGetPropertyMsg, "LastTriggerUSec", err)
 	}
 	val, ok := lastTriggerValue.Value.Value().(uint64)
 	if !ok {
-		return errors.Errorf(errConvertUint64PropertyMsg, "LastTriggerUSec", lastTriggerValue.Value.Value())
+		return fmt.Errorf(errConvertUint64PropertyMsg, "LastTriggerUSec", lastTriggerValue.Value.Value())
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.timerLastTriggerDesc, prometheus.GaugeValue,

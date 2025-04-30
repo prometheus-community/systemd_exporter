@@ -67,6 +67,7 @@ type Collector struct {
 	unitTasksCurrentDesc          *prometheus.Desc
 	unitTasksMaxDesc              *prometheus.Desc
 	unitActiveEnterTimeDesc       *prometheus.Desc
+	unitActiveEnterMonotonicDesc  *prometheus.Desc
 	unitActiveExitTimeDesc        *prometheus.Desc
 	unitInactiveEnterTimeDesc     *prometheus.Desc
 	unitInactiveExitTimeDesc      *prometheus.Desc
@@ -138,6 +139,11 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	unitActiveEnterTimeDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_active_enter_time_seconds"),
 		"Last time the unit transitioned into the active state",
+		[]string{"name", "type"}, nil,
+	)
+	unitActiveEnterMonotonicDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_active_enter_monotonic_seconds"),
+		"Monotonic time when the unit transitioned into the active state",
 		[]string{"name", "type"}, nil,
 	)
 	unitActiveExitTimeDesc := prometheus.NewDesc(
@@ -237,6 +243,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		unitTasksCurrentDesc:          unitTasksCurrentDesc,
 		unitTasksMaxDesc:              unitTasksMaxDesc,
 		unitActiveEnterTimeDesc:       unitActiveEnterTimeDesc,
+		unitActiveEnterMonotonicDesc:  unitActiveEnterMonotonicDesc,
 		unitActiveExitTimeDesc:        unitActiveExitTimeDesc,
 		unitInactiveEnterTimeDesc:     unitInactiveEnterTimeDesc,
 		unitInactiveExitTimeDesc:      unitInactiveExitTimeDesc,
@@ -276,6 +283,11 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.unitStartTimeDesc
 	desc <- c.unitTasksCurrentDesc
 	desc <- c.unitTasksMaxDesc
+	desc <- c.unitActiveEnterTimeDesc
+	desc <- c.unitActiveEnterMonotonicDesc
+	desc <- c.unitActiveExitTimeDesc
+	desc <- c.unitInactiveEnterTimeDesc
+	desc <- c.unitInactiveExitTimeDesc
 	desc <- c.nRestartsDesc
 	desc <- c.timerLastTriggerDesc
 	desc <- c.socketAcceptedConnectionsDesc
@@ -470,6 +482,10 @@ func (c *Collector) collectUnitState(ch chan<- prometheus.Metric, unit dbus.Unit
 
 func (c *Collector) collectUnitTimeMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	err := c.collectUnitTimeMetric(conn, ch, unit, c.unitActiveEnterTimeDesc, "ActiveEnterTimestamp")
+	if err != nil {
+		return err
+	}
+	err = c.collectUnitTimeMetric(conn, ch, unit, c.unitActiveEnterMonotonicDesc, "ActiveEnterTimestampMonotonic")
 	if err != nil {
 		return err
 	}

@@ -727,8 +727,11 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 			return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
 		}
 
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
-			float64(counter), unit.Name)
+		// Don't set if dbus reports MaxUint64.
+		if counter != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
+				float64(counter), unit.Name)
+		}
 	}
 
 	return nil

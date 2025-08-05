@@ -79,6 +79,10 @@ type Collector struct {
 	socketAcceptedConnectionsDesc *prometheus.Desc
 	socketCurrentConnectionsDesc  *prometheus.Desc
 	socketRefusedConnectionsDesc  *prometheus.Desc
+	ioReadBytes                   *prometheus.Desc
+	ioWriteBytes                  *prometheus.Desc
+	ioReadOperations              *prometheus.Desc
+	ioWriteOperations             *prometheus.Desc
 	ipIngressBytes                *prometheus.Desc
 	ipEgressBytes                 *prometheus.Desc
 	ipIngressPackets              *prometheus.Desc
@@ -186,6 +190,27 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		[]string{"name"}, nil,
 	)
 
+	ioReadBytes := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_read_bytes_total"),
+		"Unit read IO in bytes",
+		[]string{"name"}, nil,
+	)
+	ioWriteBytes := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_write_bytes_total"),
+		"Unit write IO in bytes",
+		[]string{"name"}, nil,
+	)
+	ioReadOperations := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_read_operations_total"),
+		"Unit read IO operations",
+		[]string{"name"}, nil,
+	)
+	ioWriteOperations := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_write_operations_total"),
+		"Unit write IO operations",
+		[]string{"name"}, nil,
+	)
+
 	ipIngressBytes := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
 		"Service unit ingress IP accounting in bytes.",
@@ -252,6 +277,10 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
 		socketCurrentConnectionsDesc:  socketCurrentConnectionsDesc,
 		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
+		ioReadBytes:                   ioReadBytes,
+		ioWriteBytes:                  ioWriteBytes,
+		ioReadOperations:              ioReadOperations,
+		ioWriteOperations:             ioWriteOperations,
 		ipIngressBytes:                ipIngressBytes,
 		ipEgressBytes:                 ipEgressBytes,
 		ipIngressPackets:              ipIngressPackets,
@@ -289,6 +318,10 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.socketAcceptedConnectionsDesc
 	desc <- c.socketCurrentConnectionsDesc
 	desc <- c.socketRefusedConnectionsDesc
+	desc <- c.ioReadBytes
+	desc <- c.ioWriteBytes
+	desc <- c.ioReadOperations
+	desc <- c.ioWriteOperations
 	desc <- c.ipIngressBytes
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
@@ -421,6 +454,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		}
 
 		err = c.collectUnitCPUMetrics(conn, ch, unit, unitType)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		err = c.collectIOAccountingMetrics(conn, ch, unit, unitType)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
@@ -636,6 +674,36 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 	ch <- prometheus.MustNewConstMetric(
 		c.socketRefusedConnectionsDesc, prometheus.GaugeValue,
 		float64(refusedConnectionCount.Value.Value().(uint32)), unit.Name)
+
+	return nil
+}
+
+func (c *Collector) collectIOAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	unitPropertyToPromDesc := map[string]*prometheus.Desc{
+		"IOReadBytes":       c.ioReadBytes,
+		"IOWriteBytes":      c.ioWriteBytes,
+		"IOReadOperations":  c.ioReadOperations,
+		"IOWriteOperations": c.ioWriteOperations,
+	}
+	unitType = capitalizeFirstCharacter(unitType)
+
+	for propertyName, desc := range unitPropertyToPromDesc {
+		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
+		if err != nil {
+			return fmt.Errorf(errGetPropertyMsg, propertyName, err)
+		}
+
+		counter, ok := property.Value.Value().(uint64)
+		if !ok {
+			return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
+		}
+
+		// Don't set if dbus reports MaxUint64.
+		if counter != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
+				float64(counter), unit.Name)
+		}
+	}
 
 	return nil
 }

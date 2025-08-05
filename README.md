@@ -88,6 +88,10 @@ Note that a number of unit types are filtered by default
 | systemd_exporter_build_info                  | Gauge       | UNSTABLE | 1 per systemd-exporter                                             |
 | systemd_unit_cpu_seconds_total               | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_unit_info                            | Gauge       | UNSTABLE | 1 per service + 1 per mount                                        |
+| systemd_unit_io_read_bytes_total             | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_io_write_bytes_total            | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_io_read_operations_total        | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_io_write_operations_total       | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_unit_memory_bytes                    | Gauge       | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_unit_state                           | Gauge       | UNSTABLE | 5 per unit {state="activating/active/deactivating/failed/inactive} |
 | systemd_unit_tasks_current                   | Gauge       | UNSTABLE | 1 per service                                                      |

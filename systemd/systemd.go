@@ -462,6 +462,18 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
+
+		err = c.collectServiceTasksMetrics(conn, ch, unit, unitType)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		if *enableIPAccountingMetrics {
+			err = c.collectIPAccountingMetrics(conn, ch, unit, unitType)
+			if err != nil {
+				logger.Warn(errUnitMetricsMsg, "err", err.Error())
+			}
+		}
 	}
 
 	switch unitType {
@@ -478,18 +490,6 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 
 		if *enableRestartsMetrics {
 			err = c.collectServiceRestartCount(conn, ch, unit)
-			if err != nil {
-				logger.Warn(errUnitMetricsMsg, "err", err.Error())
-			}
-		}
-
-		err = c.collectServiceTasksMetrics(conn, ch, unit)
-		if err != nil {
-			logger.Warn(errUnitMetricsMsg, "err", err.Error())
-		}
-
-		if *enableIPAccountingMetrics {
-			err = c.collectIPAccountingMetrics(conn, ch, unit)
 			if err != nil {
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
@@ -708,16 +708,17 @@ func (c *Collector) collectIOAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 	return nil
 }
 
-func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
 	unitPropertyToPromDesc := map[string]*prometheus.Desc{
 		"IPIngressBytes":   c.ipIngressBytes,
 		"IPEgressBytes":    c.ipEgressBytes,
 		"IPIngressPackets": c.ipIngressPackets,
 		"IPEgressPackets":  c.ipEgressPackets,
 	}
+	unitType = capitalizeFirstCharacter(unitType)
 
 	for propertyName, desc := range unitPropertyToPromDesc {
-		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", propertyName)
+		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
 		if err != nil {
 			return fmt.Errorf(errGetPropertyMsg, propertyName, err)
 		}
@@ -739,8 +740,9 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 
 // TODO either the unit should be called service_tasks, or it should work for all
 // units. It's currently named unit_task
-func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksCurrent")
+func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	unitType = capitalizeFirstCharacter(unitType)
+	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "TasksCurrent")
 	if err != nil {
 		return fmt.Errorf(errGetPropertyMsg, "TasksCurrent", err)
 	}
@@ -757,7 +759,7 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 			float64(currentCount), unit.Name)
 	}
 
-	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksMax")
+	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "TasksMax")
 	if err != nil {
 		return fmt.Errorf(errGetPropertyMsg, "TasksMax", err)
 	}

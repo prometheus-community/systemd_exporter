@@ -16,8 +16,10 @@ package systemd
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
+	"os"
 	"strconv"
 
 	// Register pprof-over-http handlers
@@ -53,6 +55,8 @@ var (
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
 	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
 	infoUnitNoHandler           = "no unit type handler for %s"
+
+	bootTime = getBootTime()
 )
 
 type Collector struct {
@@ -72,6 +76,7 @@ type Collector struct {
 	unitInactiveExitTimeDesc      *prometheus.Desc
 	nRestartsDesc                 *prometheus.Desc
 	timerLastTriggerDesc          *prometheus.Desc
+	timerNextTriggerDesc          *prometheus.Desc
 	socketAcceptedConnectionsDesc *prometheus.Desc
 	socketCurrentConnectionsDesc  *prometheus.Desc
 	socketRefusedConnectionsDesc  *prometheus.Desc
@@ -86,6 +91,28 @@ type Collector struct {
 
 	unitIncludePattern *regexp.Regexp
 	unitExcludePattern *regexp.Regexp
+}
+
+func getBootTime() uint64 {
+	f, err := os.Open("/proc/uptime")
+	if err != nil {
+		panic(fmt.Sprintf("could not open file /proc/uptime: %s", err))
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		panic(fmt.Sprintf("could not read file /proc/uptime: %s", err))
+	}
+
+	fields := strings.Fields(string(data))
+	uptimeSeconds, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse file /proc/uptime: %s", err))
+	}
+
+	now := time.Now()
+	bootTime := now.Add(-time.Duration(uptimeSeconds) * time.Second)
+	return uint64(bootTime.Unix())
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
@@ -161,6 +188,9 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	timerLastTriggerDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "timer_last_trigger_seconds"),
 		"Seconds since epoch of last trigger.", []string{"name"}, nil)
+	timerNextTriggerDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "timer_next_trigger_seconds"),
+		"Seconds since epoch of next trigger.", []string{"name"}, nil)
 	socketAcceptedConnectionsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "socket_accepted_connections_total"),
 		"Total number of accepted socket connections", []string{"name"}, nil)
@@ -242,6 +272,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		unitInactiveExitTimeDesc:      unitInactiveExitTimeDesc,
 		nRestartsDesc:                 nRestartsDesc,
 		timerLastTriggerDesc:          timerLastTriggerDesc,
+		timerNextTriggerDesc:          timerNextTriggerDesc,
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
 		socketCurrentConnectionsDesc:  socketCurrentConnectionsDesc,
 		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
@@ -278,6 +309,7 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.unitTasksMaxDesc
 	desc <- c.nRestartsDesc
 	desc <- c.timerLastTriggerDesc
+	desc <- c.timerNextTriggerDesc
 	desc <- c.socketAcceptedConnectionsDesc
 	desc <- c.socketCurrentConnectionsDesc
 	desc <- c.socketRefusedConnectionsDesc
@@ -690,6 +722,45 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 	ch <- prometheus.MustNewConstMetric(
 		c.timerLastTriggerDesc, prometheus.GaugeValue,
 		float64(val)/1e6, unit.Name)
+
+	nextRealtimeValue, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Timer", "NextElapseUSecRealtime")
+	if err != nil {
+		return fmt.Errorf(errGetPropertyMsg, "NextElapseUSecRealtime", err)
+	}
+	val, ok = nextRealtimeValue.Value.Value().(uint64)
+	if !ok {
+		return fmt.Errorf(errConvertUint64PropertyMsg, "NextElapseUSecRealtime", nextRealtimeValue.Value.Value())
+	}
+	if val != 0 {
+		// This special value happens when the service is currently active.
+		if val == math.MaxUint64 {
+			return nil
+		}
+		ch <- prometheus.MustNewConstMetric(
+			c.timerNextTriggerDesc, prometheus.GaugeValue,
+			float64(val)/1e6, unit.Name)
+		return nil
+	}
+
+	nextMonotonicValue, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Timer", "NextElapseUSecMonotonic")
+	if err != nil {
+		return fmt.Errorf(errGetPropertyMsg, "NextElapseUSecMonotonic", err)
+	}
+	val, ok = nextMonotonicValue.Value.Value().(uint64)
+	if !ok {
+		return fmt.Errorf(errConvertUint64PropertyMsg, "NextElapseUSecMonotonic", nextMonotonicValue.Value.Value())
+	}
+	if val != 0 {
+		// Monotonic value is a number of microseconds until next activation.
+		// It counts seconds from the boot time.
+		// We transform it to an absolute date.
+		val := float64(bootTime) + (float64(val) / 1e6)
+		ch <- prometheus.MustNewConstMetric(
+			c.timerNextTriggerDesc, prometheus.GaugeValue,
+			val, unit.Name)
+		return nil
+	}
+
 	return nil
 }
 

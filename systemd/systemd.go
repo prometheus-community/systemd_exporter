@@ -60,6 +60,7 @@ type Collector struct {
 	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
+	systemdVersion                *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -97,6 +98,11 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
 		"Systemd boot stage timestamps", []string{"stage"}, nil,
+	)
+	systemdVersion := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "version"),
+		"systemd version",
+		[]string{"version"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
@@ -230,6 +236,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		logger:                        logger,
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
+		systemdVersion:                systemdVersion,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -270,6 +277,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
+	desc <- c.systemdVersion
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -303,6 +311,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return fmt.Errorf("couldn't get dbus connection: %w", err)
 	}
 	defer conn.Close()
+
+	systemdVersion := c.getSystemdVersion(conn)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.systemdVersion,
+		prometheus.GaugeValue,
+		1,
+		systemdVersion,
+	)
 
 	err = c.collectBootStageTimestamps(conn, ch)
 	if err != nil {
@@ -784,4 +801,17 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 		float64(runtimeWatchdogUSec)/1e6, watchdogDeviceString)
 
 	return nil
+}
+
+func (c *Collector) getSystemdVersion(conn *dbus.Conn) string {
+	version, err := conn.GetManagerProperty("Version")
+	if err != nil {
+		c.logger.Error("Unable to get systemd version property, defaulting to 0", "err", err.Error())
+		return "0"
+	}
+
+	version = strings.TrimPrefix(strings.TrimSuffix(version, `"`), `"`)
+	c.logger.Debug("Got systemd version", "version", version)
+
+	return version
 }

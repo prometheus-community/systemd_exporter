@@ -101,7 +101,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	)
 	systemdMeta := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "meta"),
-		"Static systemd metadata", []string{"full_version"}, nil,
+		"Static systemd metadata", []string{"full_version", "architecture", "virtualization"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
@@ -362,9 +362,23 @@ func (c *Collector) collectMetadata(conn *dbus.Conn, ch chan<- prometheus.Metric
 
 	systemdVersion = trimPropertyString(systemdVersion)
 
+	arch, err := conn.GetManagerProperty("Architecture")
+	if err != nil {
+		c.logger.Debug("Failed to collect architecture status", "err", err.Error())
+	}
+
+	arch = trimPropertyString(arch)
+
+	virtualization, err := conn.GetManagerProperty("Virtualization")
+	if err != nil {
+		c.logger.Debug("Failed to collect virtualization status", "err", err.Error())
+	}
+
+	virtualization = trimPropertyString(virtualization)
+
 	ch <- prometheus.MustNewConstMetric(
 		c.systemdMeta, prometheus.GaugeValue, 1.0,
-		systemdVersion)
+		systemdVersion, arch, virtualization)
 
 	// The systemd version string can include significant suffixes after systemd's own major.minor
 	// version, e.g. 257.10-1.fc42. Parse out the first digits of the string only and assume this is

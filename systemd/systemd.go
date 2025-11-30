@@ -15,6 +15,7 @@ package systemd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -62,6 +63,11 @@ type Collector struct {
 	systemdBootTime               *prometheus.Desc
 	systemdMeta                   *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
+	unitMemoryCurrent             *prometheus.Desc
+	unitMemoryPeak                *prometheus.Desc
+	unitSwapCurrent               *prometheus.Desc
+	unitSwapPeak                  *prometheus.Desc
+	unitZSwapCurrent              *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
 	unitStartTimeDesc             *prometheus.Desc
@@ -182,6 +188,32 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		[]string{"name", "type"}, nil,
 	)
 
+	unitMemoryCurrent := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_memory_current_bytes"),
+		"Current memory usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitMemoryPeak := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_memory_peak_bytes"),
+		"Peak memory usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitSwapCurrent := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_swap_current_bytes"),
+		"Current swap usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitSwapPeak := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_swap_peak_bytes"),
+		"Peak swap usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitZSwapCurrent := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_zswap_current_bytes"),
+		"Current zswap usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+
 	ipIngressBytes := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
 		"Service unit ingress IP accounting in bytes.",
@@ -234,6 +266,11 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		systemdBootTime:               systemdBootTime,
 		systemdMeta:                   systemdMeta,
 		unitCPUTotal:                  unitCPUTotal,
+		unitMemoryCurrent:             unitMemoryCurrent,
+		unitMemoryPeak:                unitMemoryPeak,
+		unitSwapCurrent:               unitSwapCurrent,
+		unitSwapPeak:                  unitSwapPeak,
+		unitZSwapCurrent:              unitZSwapCurrent,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
 		unitStartTimeDesc:             unitStartTimeDesc,
@@ -275,6 +312,11 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootTime
 	desc <- c.systemdMeta
 	desc <- c.unitCPUTotal
+	desc <- c.unitMemoryCurrent
+	desc <- c.unitMemoryPeak
+	desc <- c.unitSwapCurrent
+	desc <- c.unitSwapPeak
+	desc <- c.unitZSwapCurrent
 	desc <- c.unitState
 	desc <- c.unitInfo
 	desc <- c.unitStartTimeDesc
@@ -483,6 +525,10 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		}
 
 		if err := c.collectUnitCPUMetrics(conn, ch, unit, unitType); err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		if err := c.collectUnitMemoryMetrics(conn, ch, unit, unitType); err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
@@ -758,6 +804,36 @@ func (c *Collector) collectUnitCPUMetrics(conn *dbus.Conn, ch chan<- prometheus.
 	}
 
 	return nil
+}
+
+func (c *Collector) collectUnitMemoryMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	var errs []error
+
+	for propertyName, desc := range map[string]*prometheus.Desc{
+		"MemoryCurrent":      c.unitMemoryCurrent,
+		"MemoryPeak":         c.unitMemoryPeak,
+		"MemorySwapCurrent":  c.unitSwapCurrent,
+		"MemorySwapPeak":     c.unitSwapPeak,
+		"MemoryZSwapCurrent": c.unitZSwapCurrent,
+	} {
+		val, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
+		if err != nil {
+			// Don't exit early, otherwise older systemd versions that don't support all these
+			// metrics will return inconsistent results per scrape based on map iteration order.
+			errs = append(errs, fmt.Errorf("collecting %s: %w", propertyName, err))
+			continue
+		}
+
+		valBytes := val.Value.Value().(uint64)
+		if valBytes != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(
+				desc, prometheus.GaugeValue, float64(valBytes),
+				unit.Name, unitType,
+			)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {

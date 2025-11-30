@@ -32,8 +32,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const namespace = "systemd"
-const watchdogSubsystem = "watchdog"
+const (
+	namespace         = "systemd"
+	watchdogSubsystem = "watchdog"
+)
 
 var (
 	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
@@ -92,17 +94,17 @@ type Collector struct {
 func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootMonotonic := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_monotonic_seconds"),
-		"Systemd boot stage monotonic timestamps", []string{"stage"}, nil,
+		"systemd boot stage monotonic timestamps", []string{"stage"}, nil,
 	)
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
-		"Systemd boot stage timestamps", []string{"stage"}, nil,
+		"systemd boot stage timestamps", []string{"stage"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
 	unitState := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_state"),
-		"Systemd unit", []string{"name", "type", "state"}, nil,
+		"systemd unit", []string{"name", "type", "state"}, nil,
 	)
 	// TODO think about if we want to have 1) one unit_info metric which has all possible labels
 	// for all possible unit type variables (at least, the relatively static ones that we care
@@ -127,12 +129,12 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	)
 	unitTasksCurrentDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_current"),
-		"Current number of tasks per Systemd unit",
+		"Current number of tasks per systemd unit",
 		[]string{"name"}, nil,
 	)
 	unitTasksMaxDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
-		"Maximum number of tasks per Systemd unit",
+		"Maximum number of tasks per systemd unit",
 		[]string{"name", "type"}, nil,
 	)
 	unitActiveEnterTimeDesc := prometheus.NewDesc(
@@ -341,13 +343,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
-	stages := []string{"Finish", "Firmware", "Loader", "Kernel", "InitRD",
+	stages := []string{
+		"Finish", "Firmware", "Loader", "Kernel", "InitRD",
 		"InitRDGeneratorsStart", "InitRDGeneratorsFinish",
 		"InitRDSecurityStart", "InitRDSecurityFinish",
 		"InitRDUnitsLoadStart", "InitRDUnitsLoadFinish",
 		"GeneratorsStart", "GeneratorsFinish",
 		"SecurityStart", "SecurityFinish", "Userspace",
-		"UnitsLoadStart", "UnitsLoadFinish"}
+		"UnitsLoadStart", "UnitsLoadFinish",
+	}
 
 	for _, stage := range stages {
 		stageMonotonicValue, err := conn.GetManagerProperty(fmt.Sprintf("%sTimestampMonotonic", stage))
@@ -726,9 +730,9 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 		return err
 	}
 
-	watchdogDeviceString := strings.TrimPrefix(strings.TrimSuffix(watchdogDevice, `"`), `"`)
+	watchdogDevice = trimPropertyString(watchdogDevice)
 
-	if len(watchdogDeviceString) == 0 {
+	if len(watchdogDevice) == 0 {
 		ch <- prometheus.MustNewConstMetric(
 			c.watchdogEnabled, prometheus.GaugeValue,
 			0)
@@ -773,15 +777,25 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 
 	ch <- prometheus.MustNewConstMetric(
 		c.watchdogLastPingMonotonic, prometheus.GaugeValue,
-		float64(watchdogLastPingMonotonic)/1e6, watchdogDeviceString)
+		float64(watchdogLastPingMonotonic)/1e6, watchdogDevice)
 
 	ch <- prometheus.MustNewConstMetric(
 		c.watchdogLastPingTimestamp, prometheus.GaugeValue,
-		float64(watchdogLastPingTimestamp)/1e6, watchdogDeviceString)
+		float64(watchdogLastPingTimestamp)/1e6, watchdogDevice)
 
 	ch <- prometheus.MustNewConstMetric(
 		c.watchdogRuntimeSeconds, prometheus.GaugeValue,
-		float64(runtimeWatchdogUSec)/1e6, watchdogDeviceString)
+		float64(runtimeWatchdogUSec)/1e6, watchdogDevice)
 
 	return nil
+}
+
+func trimPropertyString(value string) string {
+	// `"` is a single byte so this is safe, but in the general case of Unicode codepoints use strings.Trim.
+	if value[0] == '"' && value[len(value)-1] == '"' {
+		return value[1 : len(value)-1]
+	}
+
+	// Fall back to passing the original value through.
+	return value
 }

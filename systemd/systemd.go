@@ -504,6 +504,8 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
+	case "automount", "path", "target":
+		// Nothing interesting to collect.
 	default:
 		logger.Debug(infoUnitNoHandler, "full_unit", unit)
 	}

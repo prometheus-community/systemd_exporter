@@ -176,34 +176,31 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "socket_refused_connections_total"),
 		"Total number of refused socket connections", []string{"name"}, nil)
 
-	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
-	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metrics
-	// e.g. (2 modes * 4 cores) per enabled unit
 	unitCPUTotal := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
 		"Unit CPU time in seconds",
-		[]string{"name", "type", "mode"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 
 	ipIngressBytes := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
 		"Service unit ingress IP accounting in bytes.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	ipEgressBytes := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes"),
 		"Service unit egress IP accounting in bytes.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	ipIngressPackets := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets_total"),
 		"Service unit ingress IP accounting in packets.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	ipEgressPackets := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_egress_packets_total"),
 		"Service unit egress IP accounting in packets.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	watchdogEnabled := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, watchdogSubsystem, "enabled"),
@@ -458,6 +455,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 
 	unitParts := strings.Split(unit.Name, ".")
 	unitSuffix := unitParts[len(unitParts)-1]
+	unitType := strings.Title(unitSuffix)
 
 	switch unitSuffix {
 	case "service":
@@ -480,14 +478,16 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 
 		fallthrough
 	case "slice", "scope":
-		err = c.collectUnitTasksMetrics(conn, ch, unit, strings.Title(unitSuffix))
-		if err != nil {
+		if err = c.collectUnitTasksMetrics(conn, ch, unit, unitType); err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		if err := c.collectUnitCPUMetrics(conn, ch, unit, unitType); err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
 		if shouldCollectIPAccountingMetrics(systemdMajorVersion) {
-			err = c.collectIPAccountingMetrics(conn, ch, unit, strings.Title(unitSuffix))
-			if err != nil {
+			if err = c.collectIPAccountingMetrics(conn, ch, unit, unitType); err != nil {
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
@@ -697,8 +697,8 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 		}
 
 		if counter != math.MaxUint64 {
-			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
-				float64(counter), unit.Name)
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue, float64(counter),
+				unit.Name, unitType)
 		}
 	}
 
@@ -737,6 +737,24 @@ func (c *Collector) collectUnitTasksMetrics(conn *dbus.Conn, ch chan<- prometheu
 		ch <- prometheus.MustNewConstMetric(
 			c.unitTasksMaxDesc, prometheus.GaugeValue,
 			float64(maxCount), unit.Name, parseUnitType(unit))
+	}
+
+	return nil
+}
+
+func (c *Collector) collectUnitCPUMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	usageNSec, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "CPUUsageNSec")
+	if err != nil {
+		return err
+	}
+
+	usageNanos := usageNSec.Value.Value().(uint64)
+
+	if usageNanos != math.MaxUint64 {
+		ch <- prometheus.MustNewConstMetric(
+			c.unitCPUTotal, prometheus.CounterValue, float64(usageNanos)/1_000_000_000,
+			unit.Name, unitType,
+		)
 	}
 
 	return nil

@@ -62,6 +62,7 @@ type Collector struct {
 	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
+	systemdMeta                   *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -99,6 +100,10 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
 		"systemd boot stage timestamps", []string{"stage"}, nil,
+	)
+	systemdMeta := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "meta"),
+		"Static systemd metadata", []string{"full_version"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
@@ -232,6 +237,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		logger:                        logger,
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
+		systemdMeta:                   systemdMeta,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -272,6 +278,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
+	desc <- c.systemdMeta
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -305,6 +312,13 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return fmt.Errorf("couldn't get dbus connection: %w", err)
 	}
 	defer conn.Close()
+
+	_, err = c.collectMetadata(conn, ch)
+	if err != nil {
+		c.logger.Warn("Failed to get systemd version, won't automatically enable version-specific features",
+			"err", err.Error(),
+		)
+	}
 
 	err = c.collectBootStageTimestamps(conn, ch)
 	if err != nil {
@@ -340,6 +354,36 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	wg.Wait()
 	return nil
+}
+
+func (c *Collector) collectMetadata(conn *dbus.Conn, ch chan<- prometheus.Metric) (int, error) {
+	systemdVersion, err := conn.GetManagerProperty("Version")
+	if err != nil {
+		return 0, err
+	}
+
+	systemdVersion = trimPropertyString(systemdVersion)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.systemdMeta, prometheus.GaugeValue, 1.0,
+		systemdVersion)
+
+	// The systemd version string can include significant suffixes after systemd's own major.minor
+	// version, e.g. 257.10-1.fc42. Parse out the first digits of the string only and assume this is
+	// the major version.
+	major, _, ok := strings.Cut(systemdVersion, ".")
+	if !ok {
+		return 0, systemdVersionParseError{systemdVersion}
+	}
+
+	systemdMajorVersion, err := strconv.Atoi(major)
+	if err != nil {
+		return 0, nil
+	}
+
+	c.logger.Debug("systemd version collected", "major_version", systemdMajorVersion)
+
+	return systemdMajorVersion, nil
 }
 
 func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
@@ -788,6 +832,12 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 		float64(runtimeWatchdogUSec)/1e6, watchdogDevice)
 
 	return nil
+}
+
+type systemdVersionParseError struct{ from string }
+
+func (e systemdVersionParseError) Error() string {
+	return fmt.Sprintf("unable to split systemd version string %q", e.from)
 }
 
 func trimPropertyString(value string) string {

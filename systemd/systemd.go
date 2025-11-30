@@ -38,12 +38,10 @@ const (
 )
 
 var (
-	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
-	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
-	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
-	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
-	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
-	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	unitInclude    = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
+	unitExclude    = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
+	systemdPrivate = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	systemdUser    = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -313,7 +311,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 	defer conn.Close()
 
-	_, err = c.collectMetadata(conn, ch)
+	systemdMajorVersion, err := c.collectMetadata(conn, ch)
 	if err != nil {
 		c.logger.Warn("Failed to get systemd version, won't automatically enable version-specific features",
 			"err", err.Error(),
@@ -344,7 +342,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	wg.Add(len(units))
 	for _, unit := range units {
 		go func(unit dbus.UnitStatus) {
-			err := c.collectUnit(conn, ch, unit)
+			err := c.collectUnit(conn, ch, unit, systemdMajorVersion)
 			if err != nil {
 				c.logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
@@ -432,7 +430,7 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 	return nil
 }
 
-func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, systemdMajorVersion int) error {
 	logger := c.logger.With("unit", unit.Name)
 
 	// Collect unit_state for all
@@ -459,7 +457,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
-		if *enableRestartsMetrics {
+		if shouldCollectRestartsMetrics(systemdMajorVersion) {
 			err = c.collectServiceRestartCount(conn, ch, unit)
 			if err != nil {
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
@@ -471,7 +469,7 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
-		if *enableIPAccountingMetrics {
+		if shouldCollectIPAccountingMetrics(systemdMajorVersion) {
 			err = c.collectIPAccountingMetrics(conn, ch, unit)
 			if err != nil {
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())

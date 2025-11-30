@@ -51,8 +51,8 @@ var (
 	errConvertUint64PropertyMsg = "couldn't convert unit's %s property %v to uint64"
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
-	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
-	infoUnitNoHandler           = "no unit type handler for %s"
+	errUnitMetricsMsg           = "couldn't get metrics for unit"
+	infoUnitNoHandler           = "no unit type handler for unit type"
 )
 
 type Collector struct {
@@ -342,10 +342,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	wg.Add(len(units))
 	for _, unit := range units {
 		go func(unit dbus.UnitStatus) {
-			err := c.collectUnit(conn, ch, unit, systemdMajorVersion)
-			if err != nil {
-				c.logger.Warn(errUnitMetricsMsg, "err", err.Error())
-			}
+			_ = c.collectUnit(conn, ch, unit, systemdMajorVersion) // errors logged in collectUnit
 			wg.Done()
 		}(unit)
 	}
@@ -459,8 +456,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		logger.Warn(errUnitMetricsMsg, "err", err.Error())
 	}
 
-	switch {
-	case strings.HasSuffix(unit.Name, ".service"):
+	unitParts := strings.Split(unit.Name, ".")
+	unitSuffix := unitParts[len(unitParts)-1]
+
+	switch unitSuffix {
+	case "service":
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
@@ -489,23 +489,23 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
-	case strings.HasSuffix(unit.Name, ".mount"):
+	case "mount":
 		err = c.collectMountMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
-	case strings.HasSuffix(unit.Name, ".timer"):
+	case "timer":
 		err := c.collectTimerTriggerTime(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
-	case strings.HasSuffix(unit.Name, ".socket"):
+	case "socket":
 		err := c.collectSocketConnMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 	default:
-		logger.Debug(infoUnitNoHandler, "unit", unit.Name)
+		logger.Debug(infoUnitNoHandler, "full_unit", unit)
 	}
 
 	return nil

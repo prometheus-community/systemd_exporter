@@ -151,8 +151,28 @@ func buildFilterRules() ([]FilterRule, error) {
 			filterAction = FilterActionExclude
 			pattern = value
 
+		case strings.HasPrefix(arg, "--systemd.collector.unit-include="):
+			value = strings.TrimPrefix(arg, "--systemd.collector.unit-include=")
+			filterType = FilterTypeUnit
+			filterAction = FilterActionInclude
+			compiled, err := regexp.Compile(fmt.Sprintf("^(?:%s)$", value))
+			if err != nil {
+				return nil, fmt.Errorf("failed to compile unit-include pattern %q: %w", value, err)
+			}
+			pattern = compiled
+
+		case strings.HasPrefix(arg, "--systemd.collector.unit-exclude="):
+			value = strings.TrimPrefix(arg, "--systemd.collector.unit-exclude=")
+			filterType = FilterTypeUnit
+			filterAction = FilterActionExclude
+			compiled, err := regexp.Compile(fmt.Sprintf("^(?:%s)$", value))
+			if err != nil {
+				return nil, fmt.Errorf("failed to compile unit-exclude pattern %q: %w", value, err)
+			}
+			pattern = compiled
+
 		default:
-			// Not a slice filter flag, skip
+			// Not a filter flag, skip
 			continue
 		}
 

@@ -585,3 +585,121 @@ func TestFilterUnits_LegacyFiltering(t *testing.T) {
 		t.Errorf("Expected %d units, got %d", len(expectedUnits), len(filtered))
 	}
 }
+
+// Test buildFilterRules parses os.Args correctly
+func TestBuildFilterRules_ParsesAllFilterTypes(t *testing.T) {
+	// Save original os.Args and restore after test
+	originalArgs := os.Args
+	defer func() { os.Args = originalArgs }()
+
+	// Set test args with mixed filter types in specific order
+	os.Args = []string{
+		"systemd_exporter",
+		"--systemd.collector.slice-include=myapp.slice",
+		"--systemd.collector.unit-include=^extra\\.service$",
+		"--systemd.collector.slice-exclude=system.slice",
+		"--systemd.collector.unit-exclude=^foo\\.service$",
+	}
+
+	rules, err := buildFilterRules()
+	if err != nil {
+		t.Fatalf("buildFilterRules() returned error: %v", err)
+	}
+
+	// Should have 4 rules in order
+	if len(rules) != 4 {
+		t.Fatalf("Expected 4 rules, got %d", len(rules))
+	}
+
+	// Rule 0: slice-include=myapp.slice
+	if rules[0].Type != FilterTypeSlice || rules[0].Action != FilterActionInclude {
+		t.Errorf("Rule 0: expected slice-include, got type=%d action=%d", rules[0].Type, rules[0].Action)
+	}
+	if rules[0].Pattern.(string) != "myapp.slice" {
+		t.Errorf("Rule 0: expected pattern 'myapp.slice', got %v", rules[0].Pattern)
+	}
+
+	// Rule 1: unit-include=^extra\.service$
+	if rules[1].Type != FilterTypeUnit || rules[1].Action != FilterActionInclude {
+		t.Errorf("Rule 1: expected unit-include, got type=%d action=%d", rules[1].Type, rules[1].Action)
+	}
+	if _, ok := rules[1].Pattern.(*regexp.Regexp); !ok {
+		t.Errorf("Rule 1: expected *regexp.Regexp pattern, got %T", rules[1].Pattern)
+	}
+
+	// Rule 2: slice-exclude=system.slice
+	if rules[2].Type != FilterTypeSlice || rules[2].Action != FilterActionExclude {
+		t.Errorf("Rule 2: expected slice-exclude, got type=%d action=%d", rules[2].Type, rules[2].Action)
+	}
+
+	// Rule 3: unit-exclude=^foo\.service$
+	if rules[3].Type != FilterTypeUnit || rules[3].Action != FilterActionExclude {
+		t.Errorf("Rule 3: expected unit-exclude, got type=%d action=%d", rules[3].Type, rules[3].Action)
+	}
+}
+
+// CRITICAL: Test the actual user scenario - slice-include then unit-include should extend the capture
+func TestFilterUnits_SliceIncludeThenUnitInclude_ExtendsCapture(t *testing.T) {
+	sliceMap := map[string]string{
+		"app1.service":  "myapp.slice",
+		"app2.service":  "myapp.slice",
+		"extra.service": "system.slice", // NOT in myapp.slice
+		"other.service": "system.slice",
+		"foo.service":   "user.slice",
+	}
+	mockConn := createMockConn(sliceMap)
+
+	// Scenario: slice-include then unit-include should extend capture
+	// 1. slice-include=myapp.slice (capture units in that slice)
+	// 2. unit-include=^extra\.service$ (ALSO capture this specific unit)
+	filterRules := []FilterRule{
+		{Type: FilterTypeSlice, Action: FilterActionInclude, Pattern: "myapp.slice"},
+		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile(`^(?:extra\.service)$`)},
+	}
+
+	collector := createTestCollector(filterRules)
+
+	testUnitsScenario := []dbus.UnitStatus{
+		{Name: "app1.service", LoadState: "loaded"},
+		{Name: "app2.service", LoadState: "loaded"},
+		{Name: "extra.service", LoadState: "loaded"},
+		{Name: "other.service", LoadState: "loaded"},
+		{Name: "foo.service", LoadState: "loaded"},
+	}
+
+	filtered := collector.filterUnitsOrderAware(testUnitsScenario, mockConn)
+
+	// Expected: app1.service, app2.service (from slice), extra.service (from unit-include)
+	// NOT expected: other.service, foo.service
+	expectedUnits := map[string]bool{
+		"app1.service":  true,
+		"app2.service":  true,
+		"extra.service": true,
+	}
+
+	if len(filtered) != len(expectedUnits) {
+		names := make([]string, 0, len(filtered))
+		for _, u := range filtered {
+			names = append(names, u.Name)
+		}
+		t.Errorf("Expected %d units, got %d: %v", len(expectedUnits), len(filtered), names)
+	}
+
+	for _, unit := range filtered {
+		if !expectedUnits[unit.Name] {
+			t.Errorf("Unexpected unit in result: %s", unit.Name)
+		}
+	}
+
+	// Specifically verify extra.service IS included
+	found := false
+	for _, unit := range filtered {
+		if unit.Name == "extra.service" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("extra.service should be included via unit-include rule")
+	}
+}

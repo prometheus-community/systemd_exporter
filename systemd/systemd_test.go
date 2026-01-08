@@ -703,3 +703,132 @@ func TestFilterUnits_SliceIncludeThenUnitInclude_ExtendsCapture(t *testing.T) {
 		t.Errorf("extra.service should be included via unit-include rule")
 	}
 }
+
+// Test three-rule scenario: slice-include + unit-include (extra) + unit-exclude (from slice)
+func TestFilterUnits_SliceIncludeUnitIncludeUnitExclude(t *testing.T) {
+	sliceMap := map[string]string{
+		"app1.service":     "myapp.slice",
+		"app2.service":     "myapp.slice",
+		"excluded.service": "myapp.slice",  // In the slice but will be excluded
+		"extra.service":    "system.slice", // NOT in myapp.slice, but will be included
+		"other.service":    "system.slice",
+	}
+	mockConn := createMockConn(sliceMap)
+
+	// Three-rule scenario:
+	// 1. slice-include=myapp.slice (capture units in that slice)
+	// 2. unit-include=^extra\.service$ (extend capture to this service)
+	// 3. unit-exclude=^excluded\.service$ (remove this specific unit from slice)
+	filterRules := []FilterRule{
+		{Type: FilterTypeSlice, Action: FilterActionInclude, Pattern: "myapp.slice"},
+		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile(`^(?:extra\.service)$`)},
+		{Type: FilterTypeUnit, Action: FilterActionExclude, Pattern: regexp.MustCompile(`^(?:excluded\.service)$`)},
+	}
+
+	collector := createTestCollector(filterRules)
+
+	testUnitsScenario := []dbus.UnitStatus{
+		{Name: "app1.service", LoadState: "loaded"},
+		{Name: "app2.service", LoadState: "loaded"},
+		{Name: "excluded.service", LoadState: "loaded"},
+		{Name: "extra.service", LoadState: "loaded"},
+		{Name: "other.service", LoadState: "loaded"},
+	}
+
+	filtered := collector.filterUnitsOrderAware(testUnitsScenario, mockConn)
+
+	// Expected:
+	// - app1.service: in myapp.slice (rule 1) -> INCLUDED
+	// - app2.service: in myapp.slice (rule 1) -> INCLUDED
+	// - excluded.service: in myapp.slice (rule 1) then excluded (rule 3) -> EXCLUDED
+	// - extra.service: not in myapp.slice, but matched by rule 2 -> INCLUDED
+	// - other.service: not matched by any rule -> EXCLUDED (default for include-only)
+	expectedUnits := map[string]bool{
+		"app1.service":  true,
+		"app2.service":  true,
+		"extra.service": true,
+	}
+
+	if len(filtered) != len(expectedUnits) {
+		names := make([]string, 0, len(filtered))
+		for _, u := range filtered {
+			names = append(names, u.Name)
+		}
+		t.Errorf("Expected %d units, got %d: %v", len(expectedUnits), len(filtered), names)
+	}
+
+	for _, unit := range filtered {
+		if !expectedUnits[unit.Name] {
+			t.Errorf("Unexpected unit in result: %s", unit.Name)
+		}
+	}
+
+	// Verify excluded.service is NOT in results
+	for _, unit := range filtered {
+		if unit.Name == "excluded.service" {
+			t.Errorf("excluded.service should have been excluded by unit-exclude rule")
+		}
+	}
+}
+
+// Test: slice-include + unit-include (broad) + slice-exclude
+// Three slices with an app in each. Include slice1, include all apps, exclude slice3.
+// Expected: app1 (from slice1) and app2 (from unit-include) but NOT app3 (slice-exclude overrides)
+func TestFilterUnits_SliceIncludeUnitIncludeSliceExclude(t *testing.T) {
+	sliceMap := map[string]string{
+		"app1.service": "slice1.slice",
+		"app2.service": "slice2.slice",
+		"app3.service": "slice3.slice",
+	}
+	mockConn := createMockConn(sliceMap)
+
+	// Rules:
+	// 1. slice-include=slice1 (capture slice1)
+	// 2. unit-include=^app.*\.service$ (extend to all app services)
+	// 3. slice-exclude=slice3 (exclude slice3, overriding unit-include for app3)
+	filterRules := []FilterRule{
+		{Type: FilterTypeSlice, Action: FilterActionInclude, Pattern: "slice1"},
+		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile(`^(?:app.*\.service)$`)},
+		{Type: FilterTypeSlice, Action: FilterActionExclude, Pattern: "slice3"},
+	}
+
+	collector := createTestCollector(filterRules)
+
+	testUnitsScenario := []dbus.UnitStatus{
+		{Name: "app1.service", LoadState: "loaded"},
+		{Name: "app2.service", LoadState: "loaded"},
+		{Name: "app3.service", LoadState: "loaded"},
+	}
+
+	filtered := collector.filterUnitsOrderAware(testUnitsScenario, mockConn)
+
+	// Expected:
+	// - app1.service: in slice1 (rule 1) -> INCLUDED
+	// - app2.service: matches app.* (rule 2) -> INCLUDED
+	// - app3.service: matches app.* (rule 2), but in slice3 (rule 3) -> EXCLUDED
+	expectedUnits := map[string]bool{
+		"app1.service": true,
+		"app2.service": true,
+	}
+
+	if len(filtered) != len(expectedUnits) {
+		names := make([]string, 0, len(filtered))
+		for _, u := range filtered {
+			names = append(names, u.Name)
+		}
+		t.Errorf("Expected %d units, got %d: %v", len(expectedUnits), len(filtered), names)
+	}
+
+	for _, unit := range filtered {
+		if !expectedUnits[unit.Name] {
+			t.Errorf("Unexpected unit in result: %s", unit.Name)
+		}
+	}
+
+	// Verify app3.service is NOT in results
+	for _, unit := range filtered {
+		if unit.Name == "app3.service" {
+			t.Errorf("app3.service should have been excluded by slice-exclude rule")
+		}
+	}
+}

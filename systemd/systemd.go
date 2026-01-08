@@ -442,9 +442,18 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	c.sliceCache = make(map[string]string)
 	c.sliceCacheMu.Unlock()
 
-	// Use order-aware filtering if new slice filters are present, otherwise use legacy filtering
+	// Use order-aware filtering if slice filters are present, otherwise use legacy filtering
+	// Check if there are any slice filter rules (not just any filter rules)
+	hasSliceFilters := false
+	for _, rule := range c.filterRules {
+		if rule.Type == FilterTypeSlice {
+			hasSliceFilters = true
+			break
+		}
+	}
+
 	var units []dbus.UnitStatus
-	if len(c.filterRules) > 0 {
+	if hasSliceFilters {
 		units = c.filterUnitsOrderAware(allUnits, conn)
 	} else {
 		units = c.filterUnits(allUnits, c.unitIncludePattern, c.unitExcludePattern)

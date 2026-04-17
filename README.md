@@ -1,6 +1,6 @@
 # Systemd exporter
 
-[![CircleCI](https://circleci.com/gh/prometheus-community/systemd_exporter/tree/master.svg?style=shield)](circleci)
+[![Build Status](https://github.com/prometheus-community/systemd_exporter/actions/workflows/ci.yml/badge.svg)](https://github.com/prometheus-community/systemd_exporter/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/prometheus-community/systemd_exporter)](https://goreportcard.com/report/github.com/prometheus-community/systemd_exporter)
 [![Docker Pulls](https://img.shields.io/docker/pulls/prometheuscommunity/systemd-exporter.svg?maxAge=604800)](https://hub.docker.com/r/prometheuscommunity/systemd-exporter)
 [![Docker Repository on Quay](https://quay.io/repository/prometheuscommunity/systemd-exporter/status)](https://quay.io/repository/prometheuscommunity/systemd-exporter)

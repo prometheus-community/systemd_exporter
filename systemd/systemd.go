@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"strconv"
 
 	// Register pprof-over-http handlers
@@ -38,6 +39,8 @@ const watchdogSubsystem = "watchdog"
 var (
 	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
 	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
+	sliceInclude              = kingpin.Flag("systemd.collector.slice-include", "Literal slice name to include. Can be specified multiple times. Order matters for include/exclude precedence.").Strings()
+	sliceExclude              = kingpin.Flag("systemd.collector.slice-exclude", "Literal slice name to exclude. Can be specified multiple times. Order matters for include/exclude precedence.").Strings()
 	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
@@ -54,6 +57,36 @@ var (
 	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
 	infoUnitNoHandler           = "no unit type handler for %s"
 )
+
+// FilterType represents the type of filter (unit or slice)
+type FilterType int
+
+const (
+	FilterTypeUnit FilterType = iota
+	FilterTypeSlice
+)
+
+// FilterAction represents the filter action (include or exclude)
+type FilterAction int
+
+const (
+	FilterActionInclude FilterAction = iota
+	FilterActionExclude
+)
+
+// FilterRule represents a single filter rule with order preservation
+type FilterRule struct {
+	Type    FilterType
+	Action  FilterAction
+	Pattern interface{} // *regexp.Regexp for unit filters, string for slice filters
+}
+
+// dbusConnInterface defines the subset of dbus.Conn methods we need
+// This allows for easier testing with mock connections
+type dbusConnInterface interface {
+	GetUnitPropertyContext(ctx context.Context, unit string, property string) (*dbus.Property, error)
+	GetUnitTypePropertiesContext(ctx context.Context, unit string, unitType string) (map[string]interface{}, error)
+}
 
 type Collector struct {
 	ctx                           context.Context
@@ -86,6 +119,71 @@ type Collector struct {
 
 	unitIncludePattern *regexp.Regexp
 	unitExcludePattern *regexp.Regexp
+
+	// Order-aware filtering
+	filterRules  []FilterRule
+	sliceCache   map[string]string
+	sliceCacheMu sync.RWMutex
+}
+
+// buildFilterRules parses os.Args to build an ordered list of filter rules
+// This preserves the command-line order across different flag types
+func buildFilterRules() ([]FilterRule, error) {
+	var rules []FilterRule
+
+	// Parse os.Args to maintain order across different flag types
+	for _, arg := range os.Args {
+		var filterType FilterType
+		var filterAction FilterAction
+		var pattern interface{}
+		var value string
+
+		switch {
+		case strings.HasPrefix(arg, "--systemd.collector.slice-include="):
+			value = strings.TrimPrefix(arg, "--systemd.collector.slice-include=")
+			filterType = FilterTypeSlice
+			filterAction = FilterActionInclude
+			pattern = value
+
+		case strings.HasPrefix(arg, "--systemd.collector.slice-exclude="):
+			value = strings.TrimPrefix(arg, "--systemd.collector.slice-exclude=")
+			filterType = FilterTypeSlice
+			filterAction = FilterActionExclude
+			pattern = value
+
+		case strings.HasPrefix(arg, "--systemd.collector.unit-include="):
+			value = strings.TrimPrefix(arg, "--systemd.collector.unit-include=")
+			filterType = FilterTypeUnit
+			filterAction = FilterActionInclude
+			compiled, err := regexp.Compile(fmt.Sprintf("^(?:%s)$", value))
+			if err != nil {
+				return nil, fmt.Errorf("failed to compile unit-include pattern %q: %w", value, err)
+			}
+			pattern = compiled
+
+		case strings.HasPrefix(arg, "--systemd.collector.unit-exclude="):
+			value = strings.TrimPrefix(arg, "--systemd.collector.unit-exclude=")
+			filterType = FilterTypeUnit
+			filterAction = FilterActionExclude
+			compiled, err := regexp.Compile(fmt.Sprintf("^(?:%s)$", value))
+			if err != nil {
+				return nil, fmt.Errorf("failed to compile unit-exclude pattern %q: %w", value, err)
+			}
+			pattern = compiled
+
+		default:
+			// Not a filter flag, skip
+			continue
+		}
+
+		rules = append(rules, FilterRule{
+			Type:    filterType,
+			Action:  filterAction,
+			Pattern: pattern,
+		})
+	}
+
+	return rules, nil
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
@@ -223,6 +321,12 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
 	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
 
+	// Build ordered filter rules for slice-based filtering
+	filterRules, err := buildFilterRules()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build filter rules: %w", err)
+	}
+
 	// TODO: Build a custom handler to pass in the scrape http context.
 	ctx := context.TODO()
 	return &Collector{
@@ -251,6 +355,8 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		ipEgressPackets:               ipEgressPackets,
 		unitIncludePattern:            unitIncludePattern,
 		unitExcludePattern:            unitExcludePattern,
+		filterRules:                   filterRules,
+		sliceCache:                    make(map[string]string),
 		watchdogEnabled:               watchdogEnabled,
 		watchdogLastPingMonotonic:     watchdogLastPingMonotonic,
 		watchdogLastPingTimestamp:     watchdogLastPingTimestamp,
@@ -296,6 +402,15 @@ func parseUnitType(unit dbus.UnitStatus) string {
 	return t[len(t)-1]
 }
 
+// capitalizeUnitType converts unit type to capitalized form for dbus API
+// e.g., "service" -> "Service", "timer" -> "Timer"
+func capitalizeUnitType(unitType string) string {
+	if unitType == "" {
+		return ""
+	}
+	return strings.ToUpper(unitType[:1]) + unitType[1:]
+}
+
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
@@ -321,7 +436,28 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	c.logger.Debug("systemd ListUnits took", "seconds", time.Since(begin).Seconds())
 	begin = time.Now()
-	units := c.filterUnits(allUnits, c.unitIncludePattern, c.unitExcludePattern)
+
+	// Clear slice cache for fresh scrape
+	c.sliceCacheMu.Lock()
+	c.sliceCache = make(map[string]string)
+	c.sliceCacheMu.Unlock()
+
+	// Use order-aware filtering if slice filters are present, otherwise use legacy filtering
+	// Check if there are any slice filter rules (not just any filter rules)
+	hasSliceFilters := false
+	for _, rule := range c.filterRules {
+		if rule.Type == FilterTypeSlice {
+			hasSliceFilters = true
+			break
+		}
+	}
+
+	var units []dbus.UnitStatus
+	if hasSliceFilters {
+		units = c.filterUnitsOrderAware(allUnits, conn)
+	} else {
+		units = c.filterUnits(allUnits, c.unitIncludePattern, c.unitExcludePattern)
+	}
 	c.logger.Debug("systemd filterUnits took", "seconds", time.Since(begin).Seconds())
 
 	var wg sync.WaitGroup
@@ -714,6 +850,142 @@ func (c *Collector) filterUnits(units []dbus.UnitStatus, includePattern, exclude
 			filtered = append(filtered, unit)
 		} else {
 			c.logger.Debug("Ignoring unit", "unit", unit.Name)
+		}
+	}
+
+	return filtered
+}
+
+// getUnitSlice retrieves the slice for a unit with caching
+// Uses double-checked locking pattern for thread-safe cache access
+func (c *Collector) getUnitSlice(unit dbus.UnitStatus, conn dbusConnInterface) string {
+	// Check cache first (read lock)
+	c.sliceCacheMu.RLock()
+	if slice, ok := c.sliceCache[unit.Name]; ok {
+		c.sliceCacheMu.RUnlock()
+		return slice
+	}
+	c.sliceCacheMu.RUnlock()
+
+	// Not in cache - fetch from dbus (write lock)
+	c.sliceCacheMu.Lock()
+	defer c.sliceCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if slice, ok := c.sliceCache[unit.Name]; ok {
+		return slice
+	}
+
+	// Fetch from systemd using GetUnitTypePropertiesContext
+	// The Slice property is only available via type-specific properties, not GetUnitPropertyContext
+	unitType := parseUnitType(unit)
+	if unitType == "" {
+		c.logger.Debug("Could not parse unit type", "unit", unit.Name)
+		c.sliceCache[unit.Name] = ""
+		return ""
+	}
+
+	// Capitalize unit type for dbus API (e.g., "service" -> "Service")
+	unitTypeCapitalized := capitalizeUnitType(unitType)
+
+	props, err := conn.GetUnitTypePropertiesContext(c.ctx, unit.Name, unitTypeCapitalized)
+	if err != nil {
+		c.logger.Debug("Failed to get unit properties", "unit", unit.Name, "type", unitTypeCapitalized, "err", err)
+		c.sliceCache[unit.Name] = ""
+		return ""
+	}
+
+	sliceValue, ok := props["Slice"].(string)
+	if !ok {
+		c.logger.Debug("Slice property not found or not a string", "unit", unit.Name)
+		c.sliceCache[unit.Name] = ""
+		return ""
+	}
+
+	// Cache and return
+	c.sliceCache[unit.Name] = sliceValue
+	return sliceValue
+}
+
+// shouldIncludeUnit processes all filter rules in order to determine inclusion
+// Later rules override earlier ones when they match
+func (c *Collector) shouldIncludeUnit(unit dbus.UnitStatus, conn dbusConnInterface) bool {
+	// Determine default state based on slice filter composition
+	// - If there are ONLY slice-include rules: default = exclude (allow list mode)
+	//   Only units from specified slices are included
+	// - If there are ONLY slice-exclude rules: default = include (deny list mode)
+	//   All units except those from specified slices are included
+	// - If there are BOTH or neither: default = include (mixed/permissive mode)
+	//   Units are included unless explicitly filtered out
+	included := true
+	hasSliceInclude := false
+	hasSliceExclude := false
+
+	for _, rule := range c.filterRules {
+		if rule.Type == FilterTypeSlice {
+			if rule.Action == FilterActionInclude {
+				hasSliceInclude = true
+			} else {
+				hasSliceExclude = true
+			}
+		}
+	}
+
+	// Only set default to exclude if there are slice-include rules without any slice-exclude rules
+	if hasSliceInclude && !hasSliceExclude {
+		included = false
+	}
+
+	// Apply each filter rule in order
+	for _, rule := range c.filterRules {
+		matched := false
+
+		switch rule.Type {
+		case FilterTypeUnit:
+			// Unit-based filtering using regex
+			pattern := rule.Pattern.(*regexp.Regexp)
+			matched = pattern.MatchString(unit.Name)
+
+		case FilterTypeSlice:
+			// Slice-based filtering using literal string match
+			sliceName := rule.Pattern.(string)
+			unitSlice := c.getUnitSlice(unit, conn)
+
+			// Match if unit's slice matches the pattern
+			// Handle both "foo.slice" and "foo" formats
+			matched = (unitSlice == sliceName ||
+				unitSlice == sliceName+".slice" ||
+				strings.TrimSuffix(unitSlice, ".slice") == sliceName)
+		}
+
+		// If matched, update inclusion state based on action
+		if matched {
+			included = (rule.Action == FilterActionInclude)
+		}
+	}
+
+	return included
+}
+
+// filterUnitsOrderAware applies filters in command-line order
+// Each filter rule (slice or unit, include or exclude) is processed sequentially
+// Later rules override earlier ones
+func (c *Collector) filterUnitsOrderAware(units []dbus.UnitStatus, conn dbusConnInterface) []dbus.UnitStatus {
+	filtered := make([]dbus.UnitStatus, 0, len(units))
+
+	for _, unit := range units {
+		// Always skip unloaded units
+		if unit.LoadState != "loaded" {
+			c.logger.Debug("Skipping unloaded unit", "unit", unit.Name)
+			continue
+		}
+
+		// Determine final inclusion state by applying rules in order
+		if c.shouldIncludeUnit(unit, conn) {
+			c.logger.Debug("Including unit", "unit", unit.Name)
+			filtered = append(filtered, unit)
+		} else {
+			c.logger.Debug("Excluding unit", "unit", unit.Name)
 		}
 	}
 

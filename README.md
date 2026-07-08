@@ -86,16 +86,22 @@ Note that a number of unit types are filtered by default
 | Metric name                                  | Metric type | Status   | Cardinality                                                        |
 | -------------------------------------------- | ----------- | -------- | ------------------------------------------------------------------ |
 | systemd_exporter_build_info                  | Gauge       | UNSTABLE | 1 per systemd-exporter                                             |
+| systemd_unit_cpu_seconds_total               | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_unit_info                            | Gauge       | UNSTABLE | 1 per service + 1 per mount                                        |
+| systemd_unit_io_read_bytes_total             | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_io_write_bytes_total            | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_io_read_operations_total        | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_io_write_operations_total       | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_memory_bytes                    | Gauge       | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_unit_state                           | Gauge       | UNSTABLE | 5 per unit {state="activating/active/deactivating/failed/inactive} |
-| systemd_unit_tasks_current                   | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_unit_tasks_max                       | Gauge       | UNSTABLE | 1 per service                                                      |
+| systemd_unit_tasks_current                   | Gauge       | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_unit_tasks_max                       | Gauge       | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_unit_start_time_seconds              | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_service_restart_total                | Gauge       | UNSTABLE | 1 per service                                                      |
-| systemd_service_ip_ingress_bytes             | Counter     | UNSTABLE | 1 per service                                                      |
-| systemd_service_ip_egress_bytes              | Counter     | UNSTABLE | 1 per service                                                      |
-| systemd_service_ip_ingress_packets_total     | Counter     | UNSTABLE | 1 per service                                                      |
-| systemd_service_ip_egress_packets_total      | Counter     | UNSTABLE | 1 per service                                                      |
+| systemd_service_ip_ingress_bytes             | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_service_ip_egress_bytes              | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_service_ip_ingress_packets_total     | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
+| systemd_service_ip_egress_packets_total      | Counter     | UNSTABLE | 1 per slice, scope, service, socket, mount, or swap unit           |
 | systemd_socket_accepted_connections_total    | Counter     | UNSTABLE | 1 per socket                                                       |
 | systemd_socket_current_connections           | Gauge       | UNSTABLE | 1 per socket                                                       |
 | systemd_socket_refused_connections_total     | Gauge       | UNSTABLE | 1 per socket                                                       |

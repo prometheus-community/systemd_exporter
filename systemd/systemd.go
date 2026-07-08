@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"math"
 	"strconv"
+	"unicode"
 
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
@@ -32,8 +33,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const namespace = "systemd"
-const watchdogSubsystem = "watchdog"
+const (
+	namespace         = "systemd"
+	watchdogSubsystem = "watchdog"
+)
 
 var (
 	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
@@ -60,7 +63,7 @@ type Collector struct {
 	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
-	unitCPUTotal                  *prometheus.Desc
+	unitCPUTotalSecondsDesc       *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
 	unitStartTimeDesc             *prometheus.Desc
@@ -70,11 +73,16 @@ type Collector struct {
 	unitActiveExitTimeDesc        *prometheus.Desc
 	unitInactiveEnterTimeDesc     *prometheus.Desc
 	unitInactiveExitTimeDesc      *prometheus.Desc
+	unitMemoryBytesDesc           *prometheus.Desc
 	nRestartsDesc                 *prometheus.Desc
 	timerLastTriggerDesc          *prometheus.Desc
 	socketAcceptedConnectionsDesc *prometheus.Desc
 	socketCurrentConnectionsDesc  *prometheus.Desc
 	socketRefusedConnectionsDesc  *prometheus.Desc
+	ioReadBytes                   *prometheus.Desc
+	ioWriteBytes                  *prometheus.Desc
+	ioReadOperations              *prometheus.Desc
+	ioWriteOperations             *prometheus.Desc
 	ipIngressBytes                *prometheus.Desc
 	ipEgressBytes                 *prometheus.Desc
 	ipIngressPackets              *prometheus.Desc
@@ -127,12 +135,12 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	)
 	unitTasksCurrentDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_current"),
-		"Current number of tasks per Systemd unit",
+		"Current number of tasks per systemd unit",
 		[]string{"name"}, nil,
 	)
 	unitTasksMaxDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
-		"Maximum number of tasks per Systemd unit",
+		"Maximum number of tasks per systemd unit",
 		[]string{"name", "type"}, nil,
 	)
 	unitActiveEnterTimeDesc := prometheus.NewDesc(
@@ -155,6 +163,11 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		"Last time the unit transitioned out of the inactive state",
 		[]string{"name", "type"}, nil,
 	)
+	unitMemoryDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_memory_bytes"),
+		"Current memory usage per systemd unit in bytes",
+		[]string{"name"}, nil,
+	)
 	nRestartsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_restart_total"),
 		"Service unit count of Restart triggers", []string{"name"}, nil)
@@ -171,13 +184,31 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "socket_refused_connections_total"),
 		"Total number of refused socket connections", []string{"name"}, nil)
 
-	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
-	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metrics
-	// e.g. (2 modes * 4 cores) per enabled unit
 	unitCPUTotal := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
 		"Unit CPU time in seconds",
-		[]string{"name", "type", "mode"}, nil,
+		[]string{"name"}, nil,
+	)
+
+	ioReadBytes := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_read_bytes_total"),
+		"Unit read IO in bytes",
+		[]string{"name"}, nil,
+	)
+	ioWriteBytes := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_write_bytes_total"),
+		"Unit write IO in bytes",
+		[]string{"name"}, nil,
+	)
+	ioReadOperations := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_read_operations_total"),
+		"Unit read IO operations",
+		[]string{"name"}, nil,
+	)
+	ioWriteOperations := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_io_write_operations_total"),
+		"Unit write IO operations",
+		[]string{"name"}, nil,
 	)
 
 	ipIngressBytes := prometheus.NewDesc(
@@ -230,7 +261,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		logger:                        logger,
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
-		unitCPUTotal:                  unitCPUTotal,
+		unitCPUTotalSecondsDesc:       unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
 		unitStartTimeDesc:             unitStartTimeDesc,
@@ -240,11 +271,16 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		unitActiveExitTimeDesc:        unitActiveExitTimeDesc,
 		unitInactiveEnterTimeDesc:     unitInactiveEnterTimeDesc,
 		unitInactiveExitTimeDesc:      unitInactiveExitTimeDesc,
+		unitMemoryBytesDesc:           unitMemoryDesc,
 		nRestartsDesc:                 nRestartsDesc,
 		timerLastTriggerDesc:          timerLastTriggerDesc,
 		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
 		socketCurrentConnectionsDesc:  socketCurrentConnectionsDesc,
 		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
+		ioReadBytes:                   ioReadBytes,
+		ioWriteBytes:                  ioWriteBytes,
+		ioReadOperations:              ioReadOperations,
+		ioWriteOperations:             ioWriteOperations,
 		ipIngressBytes:                ipIngressBytes,
 		ipEgressBytes:                 ipEgressBytes,
 		ipIngressPackets:              ipIngressPackets,
@@ -270,17 +306,22 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
-	desc <- c.unitCPUTotal
+	desc <- c.unitCPUTotalSecondsDesc
 	desc <- c.unitState
 	desc <- c.unitInfo
 	desc <- c.unitStartTimeDesc
 	desc <- c.unitTasksCurrentDesc
 	desc <- c.unitTasksMaxDesc
+	desc <- c.unitMemoryBytesDesc
 	desc <- c.nRestartsDesc
 	desc <- c.timerLastTriggerDesc
 	desc <- c.socketAcceptedConnectionsDesc
 	desc <- c.socketCurrentConnectionsDesc
 	desc <- c.socketRefusedConnectionsDesc
+	desc <- c.ioReadBytes
+	desc <- c.ioWriteBytes
+	desc <- c.ioReadOperations
+	desc <- c.ioWriteOperations
 	desc <- c.ipIngressBytes
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
@@ -341,13 +382,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
-	stages := []string{"Finish", "Firmware", "Loader", "Kernel", "InitRD",
+	stages := []string{
+		"Finish", "Firmware", "Loader", "Kernel", "InitRD",
 		"InitRDGeneratorsStart", "InitRDGeneratorsFinish",
 		"InitRDSecurityStart", "InitRDSecurityFinish",
 		"InitRDUnitsLoadStart", "InitRDUnitsLoadFinish",
 		"GeneratorsStart", "GeneratorsFinish",
 		"SecurityStart", "SecurityFinish", "Userspace",
-		"UnitsLoadStart", "UnitsLoadFinish"}
+		"UnitsLoadStart", "UnitsLoadFinish",
+	}
 
 	for _, stage := range stages {
 		stageMonotonicValue, err := conn.GetManagerProperty(fmt.Sprintf("%sTimestampMonotonic", stage))
@@ -386,6 +429,8 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	logger := c.logger.With("unit", unit.Name)
+	unitNameParts := strings.Split(unit.Name, ".")
+	unitType := unitNameParts[len(unitNameParts)-1]
 
 	// Collect unit_state for all
 	err := c.collectUnitState(ch, unit)
@@ -399,8 +444,40 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		logger.Warn(errUnitMetricsMsg, "err", err.Error())
 	}
 
-	switch {
-	case strings.HasSuffix(unit.Name, ".service"):
+	// units for whom resource control is relevant.
+	// see systemd.resource-control(5) for more info.
+	switch unitType {
+	case "slice", "scope", "service", "socket", "mount", "swap":
+		err = c.collectUnitMemoryMetrics(conn, ch, unit, unitType)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		err = c.collectUnitCPUMetrics(conn, ch, unit, unitType)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		err = c.collectIOAccountingMetrics(conn, ch, unit, unitType)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		err = c.collectServiceTasksMetrics(conn, ch, unit, unitType)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		if *enableIPAccountingMetrics {
+			err = c.collectIPAccountingMetrics(conn, ch, unit, unitType)
+			if err != nil {
+				logger.Warn(errUnitMetricsMsg, "err", err.Error())
+			}
+		}
+	}
+
+	switch unitType {
+	case "service":
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
@@ -417,29 +494,17 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
-
-		err = c.collectServiceTasksMetrics(conn, ch, unit)
-		if err != nil {
-			logger.Warn(errUnitMetricsMsg, "err", err.Error())
-		}
-
-		if *enableIPAccountingMetrics {
-			err = c.collectIPAccountingMetrics(conn, ch, unit)
-			if err != nil {
-				logger.Warn(errUnitMetricsMsg, "err", err.Error())
-			}
-		}
-	case strings.HasSuffix(unit.Name, ".mount"):
+	case "mount":
 		err = c.collectMountMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
-	case strings.HasSuffix(unit.Name, ".timer"):
+	case "timer":
 		err := c.collectTimerTriggerTime(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
-	case strings.HasSuffix(unit.Name, ".socket"):
+	case "socket":
 		err := c.collectSocketConnMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
@@ -613,16 +678,17 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 	return nil
 }
 
-func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectIOAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
 	unitPropertyToPromDesc := map[string]*prometheus.Desc{
-		"IPIngressBytes":   c.ipIngressBytes,
-		"IPEgressBytes":    c.ipEgressBytes,
-		"IPIngressPackets": c.ipIngressPackets,
-		"IPEgressPackets":  c.ipEgressPackets,
+		"IOReadBytes":       c.ioReadBytes,
+		"IOWriteBytes":      c.ioWriteBytes,
+		"IOReadOperations":  c.ioReadOperations,
+		"IOWriteOperations": c.ioWriteOperations,
 	}
+	unitType = capitalizeFirstCharacter(unitType)
 
 	for propertyName, desc := range unitPropertyToPromDesc {
-		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", propertyName)
+		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
 		if err != nil {
 			return fmt.Errorf(errGetPropertyMsg, propertyName, err)
 		}
@@ -632,8 +698,41 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 			return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
 		}
 
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
-			float64(counter), unit.Name)
+		// Don't set if dbus reports MaxUint64.
+		if counter != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
+				float64(counter), unit.Name)
+		}
+	}
+
+	return nil
+}
+
+func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	unitPropertyToPromDesc := map[string]*prometheus.Desc{
+		"IPIngressBytes":   c.ipIngressBytes,
+		"IPEgressBytes":    c.ipEgressBytes,
+		"IPIngressPackets": c.ipIngressPackets,
+		"IPEgressPackets":  c.ipEgressPackets,
+	}
+	unitType = capitalizeFirstCharacter(unitType)
+
+	for propertyName, desc := range unitPropertyToPromDesc {
+		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
+		if err != nil {
+			return fmt.Errorf(errGetPropertyMsg, propertyName, err)
+		}
+
+		counter, ok := property.Value.Value().(uint64)
+		if !ok {
+			return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
+		}
+
+		// Don't set if dbus reports MaxUint64.
+		if counter != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
+				float64(counter), unit.Name)
+		}
 	}
 
 	return nil
@@ -641,8 +740,9 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 
 // TODO either the unit should be called service_tasks, or it should work for all
 // units. It's currently named unit_task
-func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksCurrent")
+func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	unitType = capitalizeFirstCharacter(unitType)
+	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "TasksCurrent")
 	if err != nil {
 		return fmt.Errorf(errGetPropertyMsg, "TasksCurrent", err)
 	}
@@ -659,7 +759,7 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 			float64(currentCount), unit.Name)
 	}
 
-	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksMax")
+	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "TasksMax")
 	if err != nil {
 		return fmt.Errorf(errGetPropertyMsg, "TasksMax", err)
 	}
@@ -673,6 +773,78 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 		ch <- prometheus.MustNewConstMetric(
 			c.unitTasksMaxDesc, prometheus.GaugeValue,
 			float64(maxCount), unit.Name, parseUnitType(unit))
+	}
+
+	return nil
+}
+
+func capitalizeFirstCharacter(s string) string {
+	if s == "" {
+		return s
+	}
+
+	res := string(unicode.ToUpper(rune(s[0])))
+
+	if len(s) > 1 {
+		res += s[1:]
+	}
+
+	return res
+}
+
+func (c *Collector) collectUnitMemoryMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	var (
+		propertyName      = "MemoryCurrent"
+		metricDescription = c.unitMemoryBytesDesc
+		metricType        = prometheus.GaugeValue
+	)
+	unitType = capitalizeFirstCharacter(unitType)
+
+	valueRaw, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
+	if err != nil {
+		return fmt.Errorf(errGetPropertyMsg, propertyName, err)
+	}
+
+	value, ok := valueRaw.Value.Value().(uint64)
+	if !ok {
+		return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, valueRaw.Value.Value())
+	}
+
+	// Don't set if dbus reports MaxUint64.
+	if value != math.MaxUint64 {
+		ch <- prometheus.MustNewConstMetric(
+			metricDescription, metricType,
+			float64(value), unit.Name)
+	}
+
+	return nil
+}
+
+func (c *Collector) collectUnitCPUMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	var (
+		propertyName      = "CPUUsageNSec"
+		metricDescription = c.unitCPUTotalSecondsDesc
+		metricType        = prometheus.CounterValue
+	)
+	unitType = capitalizeFirstCharacter(unitType)
+
+	valueRaw, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
+	if err != nil {
+		return fmt.Errorf(errGetPropertyMsg, propertyName, err)
+	}
+
+	value, ok := valueRaw.Value.Value().(uint64)
+	if !ok {
+		return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, valueRaw.Value.Value())
+	}
+
+	// Don't set if dbus reports MaxUint64.
+	if value != math.MaxUint64 {
+		// convert from nanoseconds to seconds
+		valueSeconds := float64(value) / float64(1e9)
+		ch <- prometheus.MustNewConstMetric(
+			metricDescription, metricType,
+			float64(valueSeconds), unit.Name)
 	}
 
 	return nil

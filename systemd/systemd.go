@@ -46,6 +46,12 @@ var (
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
 
+// systemdVersionRE matches the numeric portion of a systemd version string.
+// systemd versions are >= 3 digits (e.g. "255", "255.4"), possibly wrapped in
+// extra text like "249 (249.11-0ubuntu3)". Mirrors node_exporter so the exposed
+// value stays comparable across the two exporters.
+var systemdVersionRE = regexp.MustCompile(`[0-9]{3,}(\.[0-9]+)?`)
+
 var (
 	errGetPropertyMsg           = "couldn't get unit's %s property: %w"
 	errConvertUint64PropertyMsg = "couldn't convert unit's %s property %v to uint64"
@@ -60,6 +66,7 @@ type Collector struct {
 	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
+	systemdVersionDesc            *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -97,6 +104,10 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
 		"Systemd boot stage timestamps", []string{"stage"}, nil,
+	)
+	systemdVersion := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "version"),
+		"Detected systemd version", []string{"version"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
@@ -230,6 +241,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		logger:                        logger,
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
+		systemdVersionDesc:            systemdVersion,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -270,6 +282,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
+	desc <- c.systemdVersionDesc
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -312,6 +325,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	err = c.collectWatchdogMetrics(conn, ch)
 	if err != nil {
 		c.logger.Debug("Failed to collect watchdog metrics", "err", err.Error())
+	}
+
+	err = c.collectVersion(conn, ch)
+	if err != nil {
+		c.logger.Debug("Failed to collect systemd version", "err", err.Error())
 	}
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
@@ -381,6 +399,37 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 			stage)
 	}
 
+	return nil
+}
+
+// parseSystemdVersion extracts the numeric systemd version and the full version
+// string from the raw manager "Version" property. GetManagerProperty returns the
+// D-Bus variant's string form, which for a string property is wrapped in quotes.
+func parseSystemdVersion(raw string) (float64, string, error) {
+	version := strings.Trim(raw, `"`)
+	num := systemdVersionRE.FindString(version)
+	parsed, err := strconv.ParseFloat(num, 64)
+	if err != nil {
+		return 0, version, fmt.Errorf("couldn't parse systemd version %q: %w", version, err)
+	}
+	return parsed, version, nil
+}
+
+// collectVersion exposes the running systemd version as systemd_version, with the
+// full version string as a label and the numeric version as the value (matching
+// node_exporter's node_systemd_version).
+func (c *Collector) collectVersion(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
+	raw, err := conn.GetManagerProperty("Version")
+	if err != nil {
+		return err
+	}
+
+	parsed, version, err := parseSystemdVersion(raw)
+	if err != nil {
+		return err
+	}
+
+	ch <- prometheus.MustNewConstMetric(c.systemdVersionDesc, prometheus.GaugeValue, parsed, version)
 	return nil
 }
 

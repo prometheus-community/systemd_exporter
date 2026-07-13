@@ -15,6 +15,7 @@ package systemd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -32,16 +33,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const namespace = "systemd"
-const watchdogSubsystem = "watchdog"
+const (
+	namespace         = "systemd"
+	watchdogSubsystem = "watchdog"
+)
 
 var (
-	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
-	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
-	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
-	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
-	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
-	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	unitInclude    = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
+	unitExclude    = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
+	systemdPrivate = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
+	systemdUser    = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -51,8 +52,8 @@ var (
 	errConvertUint64PropertyMsg = "couldn't convert unit's %s property %v to uint64"
 	errConvertUint32PropertyMsg = "couldn't convert unit's %s property %v to uint32"
 	errConvertStringPropertyMsg = "couldn't convert unit's %s property %v to string"
-	errUnitMetricsMsg           = "couldn't get unit's metrics: %s"
-	infoUnitNoHandler           = "no unit type handler for %s"
+	errUnitMetricsMsg           = "couldn't get metrics for unit"
+	infoUnitNoHandler           = "no unit type handler for unit type"
 )
 
 type Collector struct {
@@ -60,7 +61,13 @@ type Collector struct {
 	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
+	systemdMeta                   *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
+	unitMemoryCurrent             *prometheus.Desc
+	unitMemoryPeak                *prometheus.Desc
+	unitSwapCurrent               *prometheus.Desc
+	unitSwapPeak                  *prometheus.Desc
+	unitZSwapCurrent              *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
 	unitStartTimeDesc             *prometheus.Desc
@@ -92,17 +99,21 @@ type Collector struct {
 func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootMonotonic := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_monotonic_seconds"),
-		"Systemd boot stage monotonic timestamps", []string{"stage"}, nil,
+		"systemd boot stage monotonic timestamps", []string{"stage"}, nil,
 	)
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
-		"Systemd boot stage timestamps", []string{"stage"}, nil,
+		"systemd boot stage timestamps", []string{"stage"}, nil,
+	)
+	systemdMeta := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "meta"),
+		"Static systemd metadata", []string{"full_version", "architecture", "virtualization"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
 	unitState := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_state"),
-		"Systemd unit", []string{"name", "type", "state"}, nil,
+		"systemd unit", []string{"name", "type", "state"}, nil,
 	)
 	// TODO think about if we want to have 1) one unit_info metric which has all possible labels
 	// for all possible unit type variables (at least, the relatively static ones that we care
@@ -127,12 +138,12 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	)
 	unitTasksCurrentDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_current"),
-		"Current number of tasks per Systemd unit",
+		"Current number of tasks per systemd unit",
 		[]string{"name"}, nil,
 	)
 	unitTasksMaxDesc := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
-		"Maximum number of tasks per Systemd unit",
+		"Maximum number of tasks per systemd unit",
 		[]string{"name", "type"}, nil,
 	)
 	unitActiveEnterTimeDesc := prometheus.NewDesc(
@@ -171,34 +182,57 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		prometheus.BuildFQName(namespace, "", "socket_refused_connections_total"),
 		"Total number of refused socket connections", []string{"name"}, nil)
 
-	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
-	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metrics
-	// e.g. (2 modes * 4 cores) per enabled unit
 	unitCPUTotal := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
 		"Unit CPU time in seconds",
-		[]string{"name", "type", "mode"}, nil,
+		[]string{"name", "type"}, nil,
+	)
+
+	unitMemoryCurrent := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_memory_current_bytes"),
+		"Current memory usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitMemoryPeak := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_memory_peak_bytes"),
+		"Peak memory usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitSwapCurrent := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_swap_current_bytes"),
+		"Current swap usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitSwapPeak := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_swap_peak_bytes"),
+		"Peak swap usage in bytes.",
+		[]string{"name", "type"}, nil,
+	)
+	unitZSwapCurrent := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "unit_zswap_current_bytes"),
+		"Current zswap usage in bytes.",
+		[]string{"name", "type"}, nil,
 	)
 
 	ipIngressBytes := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
 		"Service unit ingress IP accounting in bytes.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	ipEgressBytes := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes"),
 		"Service unit egress IP accounting in bytes.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	ipIngressPackets := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets_total"),
 		"Service unit ingress IP accounting in packets.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	ipEgressPackets := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "service_ip_egress_packets_total"),
 		"Service unit egress IP accounting in packets.",
-		[]string{"name"}, nil,
+		[]string{"name", "type"}, nil,
 	)
 	watchdogEnabled := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, watchdogSubsystem, "enabled"),
@@ -230,7 +264,13 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		logger:                        logger,
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
+		systemdMeta:                   systemdMeta,
 		unitCPUTotal:                  unitCPUTotal,
+		unitMemoryCurrent:             unitMemoryCurrent,
+		unitMemoryPeak:                unitMemoryPeak,
+		unitSwapCurrent:               unitSwapCurrent,
+		unitSwapPeak:                  unitSwapPeak,
+		unitZSwapCurrent:              unitZSwapCurrent,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
 		unitStartTimeDesc:             unitStartTimeDesc,
@@ -270,7 +310,13 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
+	desc <- c.systemdMeta
 	desc <- c.unitCPUTotal
+	desc <- c.unitMemoryCurrent
+	desc <- c.unitMemoryPeak
+	desc <- c.unitSwapCurrent
+	desc <- c.unitSwapPeak
+	desc <- c.unitZSwapCurrent
 	desc <- c.unitState
 	desc <- c.unitInfo
 	desc <- c.unitStartTimeDesc
@@ -304,6 +350,13 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 	defer conn.Close()
 
+	systemdMajorVersion, err := c.collectMetadata(conn, ch)
+	if err != nil {
+		c.logger.Warn("Failed to get systemd version, won't automatically enable version-specific features",
+			"err", err.Error(),
+		)
+	}
+
 	err = c.collectBootStageTimestamps(conn, ch)
 	if err != nil {
 		c.logger.Debug("Failed to collect boot stage timestamps", "err", err.Error())
@@ -328,10 +381,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	wg.Add(len(units))
 	for _, unit := range units {
 		go func(unit dbus.UnitStatus) {
-			err := c.collectUnit(conn, ch, unit)
-			if err != nil {
-				c.logger.Warn(errUnitMetricsMsg, "err", err.Error())
-			}
+			_ = c.collectUnit(conn, ch, unit, systemdMajorVersion) // errors logged in collectUnit
 			wg.Done()
 		}(unit)
 	}
@@ -340,14 +390,60 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	return nil
 }
 
+func (c *Collector) collectMetadata(conn *dbus.Conn, ch chan<- prometheus.Metric) (int, error) {
+	systemdVersion, err := conn.GetManagerProperty("Version")
+	if err != nil {
+		return 0, err
+	}
+
+	systemdVersion = trimPropertyString(systemdVersion)
+
+	arch, err := conn.GetManagerProperty("Architecture")
+	if err != nil {
+		c.logger.Debug("Failed to collect architecture status", "err", err.Error())
+	}
+
+	arch = trimPropertyString(arch)
+
+	virtualization, err := conn.GetManagerProperty("Virtualization")
+	if err != nil {
+		c.logger.Debug("Failed to collect virtualization status", "err", err.Error())
+	}
+
+	virtualization = trimPropertyString(virtualization)
+
+	ch <- prometheus.MustNewConstMetric(
+		c.systemdMeta, prometheus.GaugeValue, 1.0,
+		systemdVersion, arch, virtualization)
+
+	// The systemd version string can include significant suffixes after systemd's own major.minor
+	// version, e.g. 257.10-1.fc42. Parse out the first digits of the string only and assume this is
+	// the major version.
+	major, _, ok := strings.Cut(systemdVersion, ".")
+	if !ok {
+		return 0, systemdVersionParseError{systemdVersion}
+	}
+
+	systemdMajorVersion, err := strconv.Atoi(major)
+	if err != nil {
+		return 0, nil
+	}
+
+	c.logger.Debug("systemd version collected", "major_version", systemdMajorVersion)
+
+	return systemdMajorVersion, nil
+}
+
 func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
-	stages := []string{"Finish", "Firmware", "Loader", "Kernel", "InitRD",
+	stages := []string{
+		"Finish", "Firmware", "Loader", "Kernel", "InitRD",
 		"InitRDGeneratorsStart", "InitRDGeneratorsFinish",
 		"InitRDSecurityStart", "InitRDSecurityFinish",
 		"InitRDUnitsLoadStart", "InitRDUnitsLoadFinish",
 		"GeneratorsStart", "GeneratorsFinish",
 		"SecurityStart", "SecurityFinish", "Userspace",
-		"UnitsLoadStart", "UnitsLoadFinish"}
+		"UnitsLoadStart", "UnitsLoadFinish",
+	}
 
 	for _, stage := range stages {
 		stageMonotonicValue, err := conn.GetManagerProperty(fmt.Sprintf("%sTimestampMonotonic", stage))
@@ -384,7 +480,7 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 	return nil
 }
 
-func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, systemdMajorVersion int) error {
 	logger := c.logger.With("unit", unit.Name)
 
 	// Collect unit_state for all
@@ -399,8 +495,12 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 		logger.Warn(errUnitMetricsMsg, "err", err.Error())
 	}
 
-	switch {
-	case strings.HasSuffix(unit.Name, ".service"):
+	unitParts := strings.Split(unit.Name, ".")
+	unitSuffix := unitParts[len(unitParts)-1]
+	unitType := strings.Title(unitSuffix)
+
+	switch unitSuffix {
+	case "service":
 		err = c.collectServiceMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
@@ -411,41 +511,51 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
-		if *enableRestartsMetrics {
+		if shouldCollectRestartsMetrics(systemdMajorVersion) {
 			err = c.collectServiceRestartCount(conn, ch, unit)
 			if err != nil {
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
 
-		err = c.collectServiceTasksMetrics(conn, ch, unit)
-		if err != nil {
+		fallthrough
+	case "slice", "scope":
+		if err = c.collectUnitTasksMetrics(conn, ch, unit, unitType); err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
-		if *enableIPAccountingMetrics {
-			err = c.collectIPAccountingMetrics(conn, ch, unit)
-			if err != nil {
+		if err := c.collectUnitCPUMetrics(conn, ch, unit, unitType); err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		if err := c.collectUnitMemoryMetrics(conn, ch, unit, unitType); err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		}
+
+		if shouldCollectIPAccountingMetrics(systemdMajorVersion) {
+			if err = c.collectIPAccountingMetrics(conn, ch, unit, unitType); err != nil {
 				logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
 		}
-	case strings.HasSuffix(unit.Name, ".mount"):
+	case "mount":
 		err = c.collectMountMetainfo(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
-	case strings.HasSuffix(unit.Name, ".timer"):
+	case "timer":
 		err := c.collectTimerTriggerTime(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
-	case strings.HasSuffix(unit.Name, ".socket"):
+	case "socket":
 		err := c.collectSocketConnMetrics(conn, ch, unit)
 		if err != nil {
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
+	case "automount", "path", "target":
+		// Nothing interesting to collect.
 	default:
-		logger.Debug(infoUnitNoHandler, "unit", unit.Name)
+		logger.Debug(infoUnitNoHandler, "full_unit", unit)
 	}
 
 	return nil
@@ -613,7 +723,7 @@ func (c *Collector) collectSocketConnMetrics(conn *dbus.Conn, ch chan<- promethe
 	return nil
 }
 
-func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
+func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
 	unitPropertyToPromDesc := map[string]*prometheus.Desc{
 		"IPIngressBytes":   c.ipIngressBytes,
 		"IPEgressBytes":    c.ipEgressBytes,
@@ -622,7 +732,7 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 	}
 
 	for propertyName, desc := range unitPropertyToPromDesc {
-		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", propertyName)
+		property, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
 		if err != nil {
 			return fmt.Errorf(errGetPropertyMsg, propertyName, err)
 		}
@@ -632,17 +742,17 @@ func (c *Collector) collectIPAccountingMetrics(conn *dbus.Conn, ch chan<- promet
 			return fmt.Errorf(errConvertUint64PropertyMsg, propertyName, property.Value.Value())
 		}
 
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue,
-			float64(counter), unit.Name)
+		if counter != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue, float64(counter),
+				unit.Name, unitType)
+		}
 	}
 
 	return nil
 }
 
-// TODO either the unit should be called service_tasks, or it should work for all
-// units. It's currently named unit_task
-func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
-	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksCurrent")
+func (c *Collector) collectUnitTasksMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	tasksCurrentCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "TasksCurrent")
 	if err != nil {
 		return fmt.Errorf(errGetPropertyMsg, "TasksCurrent", err)
 	}
@@ -659,7 +769,7 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 			float64(currentCount), unit.Name)
 	}
 
-	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, "Service", "TasksMax")
+	tasksMaxCount, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "TasksMax")
 	if err != nil {
 		return fmt.Errorf(errGetPropertyMsg, "TasksMax", err)
 	}
@@ -676,6 +786,54 @@ func (c *Collector) collectServiceTasksMetrics(conn *dbus.Conn, ch chan<- promet
 	}
 
 	return nil
+}
+
+func (c *Collector) collectUnitCPUMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	usageNSec, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, "CPUUsageNSec")
+	if err != nil {
+		return err
+	}
+
+	usageNanos := usageNSec.Value.Value().(uint64)
+
+	if usageNanos != math.MaxUint64 {
+		ch <- prometheus.MustNewConstMetric(
+			c.unitCPUTotal, prometheus.CounterValue, float64(usageNanos)/1_000_000_000,
+			unit.Name, unitType,
+		)
+	}
+
+	return nil
+}
+
+func (c *Collector) collectUnitMemoryMetrics(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus, unitType string) error {
+	var errs []error
+
+	for propertyName, desc := range map[string]*prometheus.Desc{
+		"MemoryCurrent":      c.unitMemoryCurrent,
+		"MemoryPeak":         c.unitMemoryPeak,
+		"MemorySwapCurrent":  c.unitSwapCurrent,
+		"MemorySwapPeak":     c.unitSwapPeak,
+		"MemoryZSwapCurrent": c.unitZSwapCurrent,
+	} {
+		val, err := conn.GetUnitTypePropertyContext(c.ctx, unit.Name, unitType, propertyName)
+		if err != nil {
+			// Don't exit early, otherwise older systemd versions that don't support all these
+			// metrics will return inconsistent results per scrape based on map iteration order.
+			errs = append(errs, fmt.Errorf("collecting %s: %w", propertyName, err))
+			continue
+		}
+
+		valBytes := val.Value.Value().(uint64)
+		if valBytes != math.MaxUint64 {
+			ch <- prometheus.MustNewConstMetric(
+				desc, prometheus.GaugeValue, float64(valBytes),
+				unit.Name, unitType,
+			)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
@@ -726,9 +884,9 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 		return err
 	}
 
-	watchdogDeviceString := strings.TrimPrefix(strings.TrimSuffix(watchdogDevice, `"`), `"`)
+	watchdogDevice = trimPropertyString(watchdogDevice)
 
-	if len(watchdogDeviceString) == 0 {
+	if len(watchdogDevice) == 0 {
 		ch <- prometheus.MustNewConstMetric(
 			c.watchdogEnabled, prometheus.GaugeValue,
 			0)
@@ -773,15 +931,31 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 
 	ch <- prometheus.MustNewConstMetric(
 		c.watchdogLastPingMonotonic, prometheus.GaugeValue,
-		float64(watchdogLastPingMonotonic)/1e6, watchdogDeviceString)
+		float64(watchdogLastPingMonotonic)/1e6, watchdogDevice)
 
 	ch <- prometheus.MustNewConstMetric(
 		c.watchdogLastPingTimestamp, prometheus.GaugeValue,
-		float64(watchdogLastPingTimestamp)/1e6, watchdogDeviceString)
+		float64(watchdogLastPingTimestamp)/1e6, watchdogDevice)
 
 	ch <- prometheus.MustNewConstMetric(
 		c.watchdogRuntimeSeconds, prometheus.GaugeValue,
-		float64(runtimeWatchdogUSec)/1e6, watchdogDeviceString)
+		float64(runtimeWatchdogUSec)/1e6, watchdogDevice)
 
 	return nil
+}
+
+type systemdVersionParseError struct{ from string }
+
+func (e systemdVersionParseError) Error() string {
+	return fmt.Sprintf("unable to split systemd version string %q", e.from)
+}
+
+func trimPropertyString(value string) string {
+	// `"` is a single byte so this is safe, but in the general case of Unicode codepoints use strings.Trim.
+	if value[0] == '"' && value[len(value)-1] == '"' {
+		return value[1 : len(value)-1]
+	}
+
+	// Fall back to passing the original value through.
+	return value
 }

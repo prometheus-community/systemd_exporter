@@ -116,7 +116,7 @@ func parseProperty(object dbus.BusObject, path string) (ret []float64, err error
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range variant.Value().([]interface{}) {
+	for _, v := range variant.Value().([]any) {
 		i := v.(uint64)
 		ret = append(ret, float64(i))
 	}

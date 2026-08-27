@@ -56,6 +56,7 @@ Name     | Description |
 --systemd.collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
 --systemd.collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
 --systemd.collector.enable-ip-accounting | Enables service ip accounting metrics. This feature only works with systemd 235 and above.
+--systemd.collector.enable-resolved | Enable systemd-resolved metrics.
 
 Of note, there is no customized support for `.snapshot` (removed in systemd v228), `.busname` (only present on systems using kdbus), `generated` (created via generators), `transient` (created during systemd-run) have no special support. 
 
@@ -104,6 +105,15 @@ Note that a number of unit types are filtered by default
 | systemd_watchdog_last_ping_monotonic_seconds | Gauge       | UNSTABLE | 1                                                                  |
 | systemd_watchdog_last_ping_time_seconds      | Gauge       | UNSTABLE | 1                                                                  |
 | systemd_watchdog_runtime_seconds             | Gauge       | UNSTABLE | 1                                                                  |
+| systemd_resolved_cache_hits_total            | Counter     | UNSTABLE | 1                                                                  |
+| systemd_resolved_cache_misses_total          | Counter     | UNSTABLE | 1                                                                  |
+| systemd_resolved_current_cache_size          | Gauge       | UNSTABLE | 1                                                                  |
+| systemd_resolved_current_transactions        | Gauge       | UNSTABLE | 1                                                                  |
+| systemd_resolved_transactions_total          | Counter     | UNSTABLE | 1                                                                  |
+| systemd_resolved_dnssec_bogus_total          | Counter     | UNSTABLE | 1                                                                  |
+| systemd_resolved_dnssec_indeterminate_total  | Counter     | UNSTABLE | 1                                                                  |
+| systemd_resolved_dnssec_insecure_total       | Counter     | UNSTABLE | 1                                                                  |
+| systemd_resolved_dnssec_secure_total         | Counter     | UNSTABLE | 1                                                                  |
 
 ## Configuration
 

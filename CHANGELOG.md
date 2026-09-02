@@ -1,5 +1,8 @@
 ## main / unreleased
 
+* [FEATURE] Add slice-based filtering with `--systemd.collector.slice-include` and `--systemd.collector.slice-exclude` flags
+* [FEATURE] Implement order-aware filter rule processing allowing flexible combinations of slice and unit filters
+
 ## 0.7.0 / 2025-03-14
 
 * [CHANGE] Used TrimLeft instead of regex for boot times metrics #124

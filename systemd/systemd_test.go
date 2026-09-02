@@ -1,4 +1,4 @@
-// Copyright 2022 The Prometheus Authors
+// Copyright The Prometheus Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -31,7 +31,7 @@ type mockDbusConn struct {
 	sliceMap map[string]string // unit name -> slice name
 }
 
-func (m *mockDbusConn) GetUnitPropertyContext(ctx context.Context, unit string, prop string) (*dbus.Property, error) {
+func (m *mockDbusConn) GetUnitPropertyContext(_ context.Context, unit string, prop string) (*dbus.Property, error) {
 	if prop == "Slice" {
 		if slice, ok := m.sliceMap[unit]; ok {
 			return &dbus.Property{
@@ -44,14 +44,14 @@ func (m *mockDbusConn) GetUnitPropertyContext(ctx context.Context, unit string, 
 	return nil, fmt.Errorf("property %s not mocked", prop)
 }
 
-func (m *mockDbusConn) GetUnitTypePropertiesContext(ctx context.Context, unit string, unitType string) (map[string]interface{}, error) {
+func (m *mockDbusConn) GetUnitTypePropertiesContext(_ context.Context, unit string, _ string) (map[string]any, error) {
 	if slice, ok := m.sliceMap[unit]; ok {
-		return map[string]interface{}{
+		return map[string]any{
 			"Slice": slice,
 		}, nil
 	}
 	// Return empty map for units not in sliceMap (they might not have a Slice property)
-	return map[string]interface{}{}, nil
+	return map[string]any{}, nil
 }
 
 // Test fixtures
@@ -247,7 +247,7 @@ func TestFilterUnits_SliceExcludeThenUnitInclude(t *testing.T) {
 	// First exclude example slice, then include example.service specifically
 	filterRules := []FilterRule{
 		{Type: FilterTypeSlice, Action: FilterActionExclude, Pattern: "example"},
-		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile("^(?:example\\.service)$")},
+		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile(`^(?:example\.service)$`)},
 	}
 
 	collector := createTestCollector(filterRules)
@@ -291,7 +291,7 @@ func TestFilterUnits_SliceIncludeThenUnitExclude(t *testing.T) {
 	// First include example slice, then exclude example.service specifically
 	filterRules := []FilterRule{
 		{Type: FilterTypeSlice, Action: FilterActionInclude, Pattern: "example"},
-		{Type: FilterTypeUnit, Action: FilterActionExclude, Pattern: regexp.MustCompile("^(?:example\\.service)$")},
+		{Type: FilterTypeUnit, Action: FilterActionExclude, Pattern: regexp.MustCompile(`^(?:example\.service)$`)},
 	}
 
 	collector := createTestCollector(filterRules)
@@ -330,7 +330,7 @@ func TestFilterUnits_UnitIncludeThenSliceExclude(t *testing.T) {
 
 	// First include example.service, then exclude example slice
 	filterRules := []FilterRule{
-		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile("^(?:example\\.service)$")},
+		{Type: FilterTypeUnit, Action: FilterActionInclude, Pattern: regexp.MustCompile(`^(?:example\.service)$`)},
 		{Type: FilterTypeSlice, Action: FilterActionExclude, Pattern: "example"},
 	}
 
@@ -376,7 +376,7 @@ func TestFilterUnits_MultipleRulesComplex(t *testing.T) {
 	// 3. Exclude system slice
 	filterRules := []FilterRule{
 		{Type: FilterTypeSlice, Action: FilterActionInclude, Pattern: "example"},
-		{Type: FilterTypeUnit, Action: FilterActionExclude, Pattern: regexp.MustCompile("^(?:.*\\.timer)$")},
+		{Type: FilterTypeUnit, Action: FilterActionExclude, Pattern: regexp.MustCompile(`^(?:.*\.timer)$`)},
 		{Type: FilterTypeSlice, Action: FilterActionExclude, Pattern: "system"},
 	}
 
@@ -554,8 +554,8 @@ func TestSliceCache_Caching(t *testing.T) {
 // Test backward compatibility - legacy filtering should still work
 func TestFilterUnits_LegacyFiltering(t *testing.T) {
 	// Test the original filterUnits function still works
-	unitIncludePattern := regexp.MustCompile("^(?:.+)$")
-	unitExcludePattern := regexp.MustCompile("^(?:.+\\.(device))$")
+	unitIncludePattern := regexp.MustCompile(`^(?:.+)$`)
+	unitExcludePattern := regexp.MustCompile(`^(?:.+\.(device))$`)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	collector := &Collector{logger: logger}
@@ -830,5 +830,46 @@ func TestFilterUnits_SliceIncludeUnitIncludeSliceExclude(t *testing.T) {
 		if unit.Name == "app3.service" {
 			t.Errorf("app3.service should have been excluded by slice-exclude rule")
 		}
+	}
+}
+
+func TestParseSystemdVersion(t *testing.T) {
+	cases := []struct {
+		name        string
+		raw         string
+		wantNum     float64
+		wantVersion string
+	}{
+		{"plain quoted", `"255"`, 255, "255"},
+		{"minor version", `"255.4"`, 255.4, "255.4"},
+		{"distro suffix", `"255.4-1ubuntu8.6"`, 255.4, "255.4-1ubuntu8.6"},
+		{"parenthesised full string", `"249 (249.11-0ubuntu3.12)"`, 249, "249 (249.11-0ubuntu3.12)"},
+		{"unquoted", "252", 252, "252"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			num, version, err := parseSystemdVersion(tc.raw)
+			if err != nil {
+				t.Fatalf("parseSystemdVersion(%q) unexpected error: %v", tc.raw, err)
+			}
+			if num != tc.wantNum {
+				t.Errorf("num = %v, want %v", num, tc.wantNum)
+			}
+			if version != tc.wantVersion {
+				t.Errorf("version = %q, want %q", version, tc.wantVersion)
+			}
+		})
+	}
+}
+
+func TestParseSystemdVersionErrors(t *testing.T) {
+	// No 3+ digit version number to parse -> error rather than a bogus 0 metric.
+	for _, raw := range []string{`""`, `"unknown"`, "", "v42"} {
+		t.Run(raw, func(t *testing.T) {
+			if _, _, err := parseSystemdVersion(raw); err == nil {
+				t.Errorf("parseSystemdVersion(%q) expected error, got nil", raw)
+			}
+		})
 	}
 }

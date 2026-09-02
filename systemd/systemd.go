@@ -39,15 +39,28 @@ const watchdogSubsystem = "watchdog"
 var (
 	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
 	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
-	sliceInclude              = kingpin.Flag("systemd.collector.slice-include", "Literal slice name to include. Can be specified multiple times. Order matters for include/exclude precedence.").Strings()
-	sliceExclude              = kingpin.Flag("systemd.collector.slice-exclude", "Literal slice name to exclude. Can be specified multiple times. Order matters for include/exclude precedence.").Strings()
 	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
 )
 
+// The slice filters are registered so kingpin accepts them, but their parsed
+// values are never read: buildFilterRules re-parses os.Args because kingpin
+// discards the relative ordering between include and exclude flags, which the
+// order-aware filtering depends on.
+var (
+	_ = kingpin.Flag("systemd.collector.slice-include", "Literal slice name to include. Can be specified multiple times. Order matters for include/exclude precedence.").Strings()
+	_ = kingpin.Flag("systemd.collector.slice-exclude", "Literal slice name to exclude. Can be specified multiple times. Order matters for include/exclude precedence.").Strings()
+)
+
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
+
+// systemdVersionRE matches the numeric portion of a systemd version string.
+// systemd versions are >= 3 digits (e.g. "255", "255.4"), possibly wrapped in
+// extra text like "249 (249.11-0ubuntu3)". Mirrors node_exporter so the exposed
+// value stays comparable across the two exporters.
+var systemdVersionRE = regexp.MustCompile(`[0-9]{3,}(\.[0-9]+)?`)
 
 var (
 	errGetPropertyMsg           = "couldn't get unit's %s property: %w"
@@ -78,14 +91,14 @@ const (
 type FilterRule struct {
 	Type    FilterType
 	Action  FilterAction
-	Pattern interface{} // *regexp.Regexp for unit filters, string for slice filters
+	Pattern any // *regexp.Regexp for unit filters, string for slice filters
 }
 
 // dbusConnInterface defines the subset of dbus.Conn methods we need
 // This allows for easier testing with mock connections
 type dbusConnInterface interface {
 	GetUnitPropertyContext(ctx context.Context, unit string, property string) (*dbus.Property, error)
-	GetUnitTypePropertiesContext(ctx context.Context, unit string, unitType string) (map[string]interface{}, error)
+	GetUnitTypePropertiesContext(ctx context.Context, unit string, unitType string) (map[string]any, error)
 }
 
 type Collector struct {
@@ -93,6 +106,7 @@ type Collector struct {
 	logger                        *slog.Logger
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
+	systemdVersionDesc            *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -135,7 +149,7 @@ func buildFilterRules() ([]FilterRule, error) {
 	for _, arg := range os.Args {
 		var filterType FilterType
 		var filterAction FilterAction
-		var pattern interface{}
+		var pattern any
 		var value string
 
 		switch {
@@ -195,6 +209,10 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
 		"Systemd boot stage timestamps", []string{"stage"}, nil,
+	)
+	systemdVersion := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "version"),
+		"Detected systemd version", []string{"version"}, nil,
 	)
 	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
 	// with users before we started exporting type label
@@ -334,6 +352,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		logger:                        logger,
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
+		systemdVersionDesc:            systemdVersion,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -376,6 +395,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
+	desc <- c.systemdVersionDesc
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -427,6 +447,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	err = c.collectWatchdogMetrics(conn, ch)
 	if err != nil {
 		c.logger.Debug("Failed to collect watchdog metrics", "err", err.Error())
+	}
+
+	err = c.collectVersion(conn, ch)
+	if err != nil {
+		c.logger.Debug("Failed to collect systemd version", "err", err.Error())
 	}
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
@@ -517,6 +542,37 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 			stage)
 	}
 
+	return nil
+}
+
+// parseSystemdVersion extracts the numeric systemd version and the full version
+// string from the raw manager "Version" property. GetManagerProperty returns the
+// D-Bus variant's string form, which for a string property is wrapped in quotes.
+func parseSystemdVersion(raw string) (float64, string, error) {
+	version := strings.Trim(raw, `"`)
+	num := systemdVersionRE.FindString(version)
+	parsed, err := strconv.ParseFloat(num, 64)
+	if err != nil {
+		return 0, version, fmt.Errorf("couldn't parse systemd version %q: %w", version, err)
+	}
+	return parsed, version, nil
+}
+
+// collectVersion exposes the running systemd version as systemd_version, with the
+// full version string as a label and the numeric version as the value (matching
+// node_exporter's node_systemd_version).
+func (c *Collector) collectVersion(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
+	raw, err := conn.GetManagerProperty("Version")
+	if err != nil {
+		return err
+	}
+
+	parsed, version, err := parseSystemdVersion(raw)
+	if err != nil {
+		return err
+	}
+
+	ch <- prometheus.MustNewConstMetric(c.systemdVersionDesc, prometheus.GaugeValue, parsed, version)
 	return nil
 }
 

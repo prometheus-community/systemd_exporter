@@ -56,6 +56,7 @@ Name     | Description |
 --systemd.collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
 --systemd.collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
 --systemd.collector.enable-ip-accounting | Enables service ip accounting metrics. This feature only works with systemd 235 and above.
+--systemd.collector.disable-unit-state | Disables systemd_unit_state metrics. These metrics have high cardinality (5 series per unit).
 
 Of note, there is no customized support for `.snapshot` (removed in systemd v228), `.busname` (only present on systems using kdbus), `generated` (created via generators), `transient` (created during systemd-run) have no special support. 
 
@@ -87,7 +88,7 @@ Note that a number of unit types are filtered by default
 | -------------------------------------------- | ----------- | -------- | ------------------------------------------------------------------ |
 | systemd_exporter_build_info                  | Gauge       | UNSTABLE | 1 per systemd-exporter                                             |
 | systemd_unit_info                            | Gauge       | UNSTABLE | 1 per service + 1 per mount                                        |
-| systemd_unit_state                           | Gauge       | UNSTABLE | 5 per unit {state="activating/active/deactivating/failed/inactive} |
+| systemd_unit_state                           | Gauge       | UNSTABLE | 5 per unit {state="activating/active/deactivating/failed/inactive}; can be disabled with `--systemd.collector.disable-unit-state` |
 | systemd_unit_tasks_current                   | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_unit_tasks_max                       | Gauge       | UNSTABLE | 1 per service                                                      |
 | systemd_unit_start_time_seconds              | Gauge       | UNSTABLE | 1 per service                                                      |

@@ -42,6 +42,7 @@ var (
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	disableUnitState          = kingpin.Flag("systemd.collector.disable-unit-state", "Disables systemd_unit_state metrics. These metrics have high cardinality (5 series per unit).").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -309,6 +310,12 @@ func parseUnitType(unit dbus.UnitStatus) string {
 	return t[len(t)-1]
 }
 
+// shouldCollectUnitState reports whether systemd_unit_state metrics should be
+// emitted. Collection stays on by default so existing scrapes keep their series.
+func shouldCollectUnitState() bool {
+	return !*disableUnitState
+}
+
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
@@ -436,11 +443,14 @@ func (c *Collector) collectVersion(conn *dbus.Conn, ch chan<- prometheus.Metric)
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
 	logger := c.logger.With("unit", unit.Name)
 
-	// Collect unit_state for all
-	err := c.collectUnitState(ch, unit)
-	if err != nil {
-		logger.Warn(errUnitMetricsMsg, "err", err.Error())
-		// TODO should we continue processing here?
+	// Collect unit_state for all unless disabled (high cardinality: 5 series per unit).
+	var err error
+	if shouldCollectUnitState() {
+		err = c.collectUnitState(ch, unit)
+		if err != nil {
+			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+			// TODO should we continue processing here?
+		}
 	}
 
 	err = c.collectUnitTimeMetrics(conn, ch, unit)

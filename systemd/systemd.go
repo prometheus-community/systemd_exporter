@@ -42,6 +42,8 @@ var (
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	enableStartTimeMetrics    = kingpin.Flag("systemd.collector.enable-start-time-metrics", "Enables service start time metrics. Enabled by default, disable with --no-systemd.collector.enable-start-time-metrics.").Default("true").Bool()
+	enableTaskMetrics         = kingpin.Flag("systemd.collector.enable-task-metrics", "Enables service task metrics. Enabled by default, disable with --no-systemd.collector.enable-task-metrics.").Default("true").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -455,9 +457,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			logger.Warn(errUnitMetricsMsg, "err", err.Error())
 		}
 
-		err = c.collectServiceStartTimeMetrics(conn, ch, unit)
-		if err != nil {
-			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		if *enableStartTimeMetrics {
+			err = c.collectServiceStartTimeMetrics(conn, ch, unit)
+			if err != nil {
+				logger.Warn(errUnitMetricsMsg, "err", err.Error())
+			}
 		}
 
 		if *enableRestartsMetrics {
@@ -467,9 +471,11 @@ func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, un
 			}
 		}
 
-		err = c.collectServiceTasksMetrics(conn, ch, unit)
-		if err != nil {
-			logger.Warn(errUnitMetricsMsg, "err", err.Error())
+		if *enableTaskMetrics {
+			err = c.collectServiceTasksMetrics(conn, ch, unit)
+			if err != nil {
+				logger.Warn(errUnitMetricsMsg, "err", err.Error())
+			}
 		}
 
 		if *enableIPAccountingMetrics {

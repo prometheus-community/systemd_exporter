@@ -20,8 +20,6 @@ import (
 	"math"
 	"strconv"
 
-	// Register pprof-over-http handlers
-	_ "net/http/pprof"
 	"regexp"
 	"strings"
 	"sync"
@@ -36,12 +34,18 @@ const namespace = "systemd"
 const watchdogSubsystem = "watchdog"
 
 var (
-	unitInclude               = kingpin.Flag("systemd.collector.unit-include", "Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
-	unitExclude               = kingpin.Flag("systemd.collector.unit-exclude", "Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
-	systemdPrivate            = kingpin.Flag("systemd.collector.private", "Establish a private, direct connection to systemd without dbus.").Bool()
-	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
-	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
-	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	unitInclude = kingpin.Flag("systemd.collector.unit-include",
+		"Regexp of systemd units to include. Units must both match include and not match exclude to be included.").Default(".+").String()
+	unitExclude = kingpin.Flag("systemd.collector.unit-exclude",
+		"Regexp of systemd units to exclude. Units must both match include and not match exclude to be included.").Default(".+\\.(device)").String()
+	systemdPrivate = kingpin.Flag("systemd.collector.private",
+		"Establish a private, direct connection to systemd without dbus.").Bool()
+	systemdUser = kingpin.Flag("systemd.collector.user",
+		"Connect to the user systemd instance.").Bool()
+	enableRestartsMetrics = kingpin.Flag("systemd.collector.enable-restart-count",
+		"Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
+	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting",
+		"Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -62,8 +66,12 @@ var (
 )
 
 type Collector struct {
-	ctx                           context.Context
-	logger                        *slog.Logger
+	ctx    context.Context
+	logger *slog.Logger
+
+	unitIncludePattern *regexp.Regexp
+	unitExcludePattern *regexp.Regexp
+
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
 	systemdVersionDesc            *prometheus.Desc
@@ -90,184 +98,168 @@ type Collector struct {
 	watchdogLastPingMonotonic     *prometheus.Desc
 	watchdogLastPingTimestamp     *prometheus.Desc
 	watchdogRuntimeSeconds        *prometheus.Desc
-
-	unitIncludePattern *regexp.Regexp
-	unitExcludePattern *regexp.Regexp
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
-func NewCollector(logger *slog.Logger) (*Collector, error) {
-	systemdBootMonotonic := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "boot_monotonic_seconds"),
-		"Systemd boot stage monotonic timestamps", []string{"stage"}, nil,
-	)
-	systemdBootTime := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
-		"Systemd boot stage timestamps", []string{"stage"}, nil,
-	)
-	systemdVersion := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "version"),
-		"Detected systemd version", []string{"version"}, nil,
-	)
-	// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
-	// with users before we started exporting type label
-	unitState := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_state"),
-		"Systemd unit", []string{"name", "type", "state"}, nil,
-	)
-	// TODO think about if we want to have 1) one unit_info metric which has all possible labels
-	// for all possible unit type variables (at least, the relatively static ones that we care
-	// about such as type, generated-vs-real-unit, etc). Cons: a) huge waste since all these labels
-	// have to be set to foo="" on non-relevant types. b) accidental overloading (e.g. we have type
-	// label, but it means something different for a service vs a mount. Right now it's impossible to
-	// detangle that.
-	// Option 1) is we have service_info, mount_info, target_info, etc. Many more metrics, but far fewer
-	// wasted labels and little chance of semantic confusion. Our current codebase is not tuned for this,
-	// we would be adding likt 30% more lines of just boilerplate to declare these different metrics
-	// w.r.t. cardinality and performance, option 2 is slightly better performance due to smaller scrape payloads
-	// but otherwise (1) and (2) seem similar
-	unitInfo := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_info"),
-		"Mostly-static metadata for all unit types",
-		[]string{"name", "type", "mount_type", "service_type"}, nil,
-	)
-	unitStartTimeDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_start_time_seconds"),
-		"Start time of the unit since unix epoch in seconds.",
-		[]string{"name", "type"}, nil,
-	)
-	unitTasksCurrentDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_tasks_current"),
-		"Current number of tasks per Systemd unit",
-		[]string{"name"}, nil,
-	)
-	unitTasksMaxDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
-		"Maximum number of tasks per Systemd unit",
-		[]string{"name", "type"}, nil,
-	)
-	unitActiveEnterTimeDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_active_enter_time_seconds"),
-		"Last time the unit transitioned into the active state",
-		[]string{"name", "type"}, nil,
-	)
-	unitActiveExitTimeDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_active_exit_time_seconds"),
-		"Last time the unit transitioned out of the active state",
-		[]string{"name", "type"}, nil,
-	)
-	unitInactiveEnterTimeDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_inactive_enter_time_seconds"),
-		"Last time the unit transitioned into the inactive state",
-		[]string{"name", "type"}, nil,
-	)
-	unitInactiveExitTimeDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_inactive_exit_time_seconds"),
-		"Last time the unit transitioned out of the inactive state",
-		[]string{"name", "type"}, nil,
-	)
-	nRestartsDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_restart_total"),
-		"Service unit count of Restart triggers", []string{"name"}, nil)
-	timerLastTriggerDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "timer_last_trigger_seconds"),
-		"Seconds since epoch of last trigger.", []string{"name"}, nil)
-	socketAcceptedConnectionsDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "socket_accepted_connections_total"),
-		"Total number of accepted socket connections", []string{"name"}, nil)
-	socketCurrentConnectionsDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "socket_current_connections"),
-		"Current number of socket connections", []string{"name"}, nil)
-	socketRefusedConnectionsDesc := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "socket_refused_connections_total"),
-		"Total number of refused socket connections", []string{"name"}, nil)
-
-	// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
-	// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metrics
-	// e.g. (2 modes * 4 cores) per enabled unit
-	unitCPUTotal := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
-		"Unit CPU time in seconds",
-		[]string{"name", "type", "mode"}, nil,
-	)
-
-	ipIngressBytes := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
-		"Service unit ingress IP accounting in bytes.",
-		[]string{"name"}, nil,
-	)
-	ipEgressBytes := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes"),
-		"Service unit egress IP accounting in bytes.",
-		[]string{"name"}, nil,
-	)
-	ipIngressPackets := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets_total"),
-		"Service unit ingress IP accounting in packets.",
-		[]string{"name"}, nil,
-	)
-	ipEgressPackets := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_ip_egress_packets_total"),
-		"Service unit egress IP accounting in packets.",
-		[]string{"name"}, nil,
-	)
-	watchdogEnabled := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, watchdogSubsystem, "enabled"),
-		"systemd watchdog enabled",
-		nil, nil,
-	)
-	watchdogLastPingMonotonic := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, watchdogSubsystem, "last_ping_monotonic_seconds"),
-		"systemd watchdog last ping monotonic seconds",
-		[]string{"device"}, nil,
-	)
-	watchdogLastPingTimestamp := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, watchdogSubsystem, "last_ping_time_seconds"),
-		"systemd watchdog last ping time seconds",
-		[]string{"device"}, nil,
-	)
-	watchdogRuntimeSeconds := prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, watchdogSubsystem, "runtime_seconds"),
-		"systemd watchdog runtime seconds",
-		[]string{"device"}, nil,
-	)
-	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
-	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
-
+func NewCollector(logger *slog.Logger) *Collector {
 	// TODO: Build a custom handler to pass in the scrape http context.
 	ctx := context.TODO()
+
 	return &Collector{
-		ctx:                           ctx,
-		logger:                        logger,
-		systemdBootMonotonic:          systemdBootMonotonic,
-		systemdBootTime:               systemdBootTime,
-		systemdVersionDesc:            systemdVersion,
-		unitCPUTotal:                  unitCPUTotal,
-		unitState:                     unitState,
-		unitInfo:                      unitInfo,
-		unitStartTimeDesc:             unitStartTimeDesc,
-		unitTasksCurrentDesc:          unitTasksCurrentDesc,
-		unitTasksMaxDesc:              unitTasksMaxDesc,
-		unitActiveEnterTimeDesc:       unitActiveEnterTimeDesc,
-		unitActiveExitTimeDesc:        unitActiveExitTimeDesc,
-		unitInactiveEnterTimeDesc:     unitInactiveEnterTimeDesc,
-		unitInactiveExitTimeDesc:      unitInactiveExitTimeDesc,
-		nRestartsDesc:                 nRestartsDesc,
-		timerLastTriggerDesc:          timerLastTriggerDesc,
-		socketAcceptedConnectionsDesc: socketAcceptedConnectionsDesc,
-		socketCurrentConnectionsDesc:  socketCurrentConnectionsDesc,
-		socketRefusedConnectionsDesc:  socketRefusedConnectionsDesc,
-		ipIngressBytes:                ipIngressBytes,
-		ipEgressBytes:                 ipEgressBytes,
-		ipIngressPackets:              ipIngressPackets,
-		ipEgressPackets:               ipEgressPackets,
-		unitIncludePattern:            unitIncludePattern,
-		unitExcludePattern:            unitExcludePattern,
-		watchdogEnabled:               watchdogEnabled,
-		watchdogLastPingMonotonic:     watchdogLastPingMonotonic,
-		watchdogLastPingTimestamp:     watchdogLastPingTimestamp,
-		watchdogRuntimeSeconds:        watchdogRuntimeSeconds,
-	}, nil
+		ctx:    ctx,
+		logger: logger,
+
+		unitIncludePattern: regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude)),
+		unitExcludePattern: regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude)),
+
+		systemdBootMonotonic: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "boot_monotonic_seconds"),
+			"Systemd boot stage monotonic timestamps.",
+			[]string{"stage"}, nil,
+		),
+		systemdBootTime: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
+			"Systemd boot stage timestamps.",
+			[]string{"stage"}, nil,
+		),
+		systemdVersionDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "version"),
+			"Detected systemd version.",
+			[]string{"version"}, nil,
+		),
+		// We could add a cpu label, but IMO that could cause a cardinality explosion. We already export
+		// two modes per unit (user/system), and on a modest 4 core machine adding a cpu label would cause us to export 8 metrics
+		// e.g. (2 modes * 4 cores) per enabled unit
+		unitCPUTotal: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_cpu_seconds_total"),
+			"Unit CPU time in seconds.",
+			[]string{"name", "type", "mode"}, nil,
+		),
+		// Type is labeled twice e.g. name="foo.service" and type="service" to maintain compatibility
+		// with users before we started exporting type label
+		unitState: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_state"),
+			"Systemd unit.",
+			[]string{"name", "type", "state"}, nil,
+		),
+		// TODO think about if we want to have 1) one unit_info metric which has all possible labels
+		// for all possible unit type variables (at least, the relatively static ones that we care
+		// about such as type, generated-vs-real-unit, etc). Cons: a) huge waste since all these labels
+		// have to be set to foo="" on non-relevant types. b) accidental overloading (e.g. we have type
+		// label, but it means something different for a service vs a mount. Right now it's impossible to
+		// detangle that.
+		// Option 1) is we have service_info, mount_info, target_info, etc. Many more metrics, but far fewer
+		// wasted labels and little chance of semantic confusion. Our current codebase is not tuned for this,
+		// we would be adding likt 30% more lines of just boilerplate to declare these different metrics
+		// w.r.t. cardinality and performance, option 2 is slightly better performance due to smaller scrape payloads
+		// but otherwise (1) and (2) seem similar
+		unitInfo: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_info"),
+			"Mostly-static metadata for all unit types.",
+			[]string{"name", "type", "mount_type", "service_type"}, nil,
+		),
+		unitStartTimeDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_start_time_seconds"),
+			"Start time of the unit since unix epoch in seconds.",
+			[]string{"name", "type"}, nil,
+		),
+		unitTasksCurrentDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_tasks_current"),
+			"Current number of tasks per Systemd unit.",
+			[]string{"name"}, nil,
+		),
+		unitTasksMaxDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_tasks_max"),
+			"Maximum number of tasks per Systemd unit.",
+			[]string{"name", "type"}, nil,
+		),
+		unitActiveEnterTimeDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_active_enter_time_seconds"),
+			"Last time the unit transitioned into the active state.",
+			[]string{"name", "type"}, nil,
+		),
+		unitActiveExitTimeDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_active_exit_time_seconds"),
+			"Last time the unit transitioned out of the active state.",
+			[]string{"name", "type"}, nil,
+		),
+		unitInactiveEnterTimeDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_inactive_enter_time_seconds"),
+			"Last time the unit transitioned into the inactive state.",
+			[]string{"name", "type"}, nil,
+		),
+		unitInactiveExitTimeDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "unit_inactive_exit_time_seconds"),
+			"Last time the unit transitioned out of the inactive state.",
+			[]string{"name", "type"}, nil,
+		),
+		nRestartsDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "service_restart_total"),
+			"Service unit count of Restart triggers.",
+			[]string{"name"}, nil,
+		),
+		timerLastTriggerDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "timer_last_trigger_seconds"),
+			"Seconds since epoch of last trigger.",
+			[]string{"name"}, nil,
+		),
+		socketAcceptedConnectionsDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "socket_accepted_connections_total"),
+			"Total number of accepted socket connections.",
+			[]string{"name"}, nil,
+		),
+		socketCurrentConnectionsDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "socket_current_connections"),
+			"Current number of socket connections.",
+			[]string{"name"}, nil,
+		),
+		socketRefusedConnectionsDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "socket_refused_connections_total"),
+			"Total number of refused socket connections.",
+			[]string{"name"}, nil,
+		),
+
+		ipIngressBytes: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "service_ip_ingress_bytes"),
+			"Service unit ingress IP accounting in bytes.",
+			[]string{"name"}, nil,
+		),
+		ipEgressBytes: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "service_ip_egress_bytes"),
+			"Service unit egress IP accounting in bytes.",
+			[]string{"name"}, nil,
+		),
+		ipIngressPackets: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "service_ip_ingress_packets_total"),
+			"Service unit ingress IP accounting in packets.",
+			[]string{"name"}, nil,
+		),
+		ipEgressPackets: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "service_ip_egress_packets_total"),
+			"Service unit egress IP accounting in packets.",
+			[]string{"name"}, nil,
+		),
+		watchdogEnabled: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, watchdogSubsystem, "enabled"),
+			"systemd watchdog enabled.",
+			nil, nil,
+		),
+		watchdogLastPingMonotonic: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, watchdogSubsystem, "last_ping_monotonic_seconds"),
+			"systemd watchdog last ping monotonic seconds.",
+			[]string{"device"}, nil,
+		),
+		watchdogLastPingTimestamp: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, watchdogSubsystem, "last_ping_time_seconds"),
+			"systemd watchdog last ping time seconds.",
+			[]string{"device"}, nil,
+		),
+		watchdogRuntimeSeconds: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, watchdogSubsystem, "runtime_seconds"),
+			"systemd watchdog runtime seconds.",
+			[]string{"device"}, nil,
+		),
+	}
 }
 
 // Collect gathers metrics from systemd.
@@ -304,17 +296,14 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.watchdogRuntimeSeconds
 }
 
-func parseUnitType(unit dbus.UnitStatus) string {
-	t := strings.Split(unit.Name, ".")
-	return t[len(t)-1]
-}
-
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
+
 	conn, err := c.newDbus()
 	if err != nil {
 		return fmt.Errorf("couldn't get dbus connection: %w", err)
 	}
+
 	defer conn.Close()
 
 	err = c.collectBootStageTimestamps(conn, ch)
@@ -343,15 +332,14 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	c.logger.Debug("systemd filterUnits took", "seconds", time.Since(begin).Seconds())
 
 	var wg sync.WaitGroup
-	wg.Add(len(units))
+
 	for _, unit := range units {
-		go func(unit dbus.UnitStatus) {
+		wg.Go(func() {
 			err := c.collectUnit(conn, ch, unit)
 			if err != nil {
 				c.logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
-			wg.Done()
-		}(unit)
+		})
 	}
 
 	wg.Wait()
@@ -400,19 +388,6 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 	}
 
 	return nil
-}
-
-// parseSystemdVersion extracts the numeric systemd version and the full version
-// string from the raw manager "Version" property. GetManagerProperty returns the
-// D-Bus variant's string form, which for a string property is wrapped in quotes.
-func parseSystemdVersion(raw string) (float64, string, error) {
-	version := strings.Trim(raw, `"`)
-	num := systemdVersionRE.FindString(version)
-	parsed, err := strconv.ParseFloat(num, 64)
-	if err != nil {
-		return 0, version, fmt.Errorf("couldn't parse systemd version %q: %w", version, err)
-	}
-	return parsed, version, nil
 }
 
 // collectVersion exposes the running systemd version as systemd_version, with the
@@ -833,4 +808,22 @@ func (c *Collector) collectWatchdogMetrics(conn *dbus.Conn, ch chan<- prometheus
 		float64(runtimeWatchdogUSec)/1e6, watchdogDeviceString)
 
 	return nil
+}
+
+// parseSystemdVersion extracts the numeric systemd version and the full version
+// string from the raw manager "Version" property. GetManagerProperty returns the
+// D-Bus variant's string form, which for a string property is wrapped in quotes.
+func parseSystemdVersion(raw string) (float64, string, error) {
+	version := strings.Trim(raw, `"`)
+	num := systemdVersionRE.FindString(version)
+	parsed, err := strconv.ParseFloat(num, 64)
+	if err != nil {
+		return 0, version, fmt.Errorf("couldn't parse systemd version %q: %w", version, err)
+	}
+	return parsed, version, nil
+}
+
+func parseUnitType(unit dbus.UnitStatus) string {
+	t := strings.Split(unit.Name, ".")
+	return t[len(t)-1]
 }

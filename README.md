@@ -107,13 +107,51 @@ Note that a number of unit types are filtered by default
 
 ## Configuration
 
-systemd_exporter allows you to include/exclude some systemd units. You can use `--systemd.collector.unit-include` and `--systemd.collector.unit-exclude` to select wanted units. Both of these options are in [RE2](https://github.com/google/re2/wiki/Syntax) syntax. For example:
+systemd_exporter allows you to include/exclude systemd units using two filtering approaches:
+
+### Unit-based filtering
+
+You can use `--systemd.collector.unit-include` and `--systemd.collector.unit-exclude` to select units by name. Both options use [RE2](https://github.com/google/re2/wiki/Syntax) regex syntax. For example:
 
 ```
 args:
   - --systemd.collector.unit-include=.*ceph.*\.service|ceph.*\.timer|kubelet.service|docker.service
   - --systemd.collector.unit-exclude=ceph-volume.*\.service
 ```
+
+### Slice-based filtering
+
+You can use `--systemd.collector.slice-include` and `--systemd.collector.slice-exclude` to filter units based on their systemd slice membership. These flags use literal string matching (not regex) and can be specified multiple times. Slice names can be provided with or without the `.slice` suffix.
+
+```
+args:
+  - --systemd.collector.slice-include=user
+  - --systemd.collector.slice-include=system
+  - --systemd.collector.slice-exclude=machine
+```
+
+#### Slice filtering behavior
+
+- **Include-only mode**: When only `slice-include` flags are present, only units from the specified slices are exported (allowlist mode).
+- **Exclude-only mode**: When only `slice-exclude` flags are present, all units except those from specified slices are exported (denylist mode).
+- **Mixed mode**: When both include and exclude flags are present, units are included by default and filtered by the rules in command-line order.
+
+#### Order-aware filtering
+
+When multiple filter flags are combined, they are processed in the order they appear on the command line. Later rules override earlier ones for matching units. This allows flexible filtering strategies:
+
+```
+args:
+  # First include user slice, then exclude specific unit
+  - --systemd.collector.slice-include=user
+  - --systemd.collector.unit-exclude=user-1000\.slice
+
+  # First exclude system slice, then re-include specific units from it
+  - --systemd.collector.slice-exclude=system
+  - --systemd.collector.unit-include=ssh\.service|cron\.service
+```
+
+**Important**: Order matters! A unit-level filter can override a slice-level filter and vice versa, depending on which appears later in the command line.
 
 ## TLS and basic authentication
 

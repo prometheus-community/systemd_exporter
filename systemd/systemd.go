@@ -231,8 +231,16 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		"systemd watchdog runtime seconds",
 		[]string{"device"}, nil,
 	)
-	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
-	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
+
+	unitIncludePattern, err := regexp.Compile(fmt.Sprintf("^(?:%s)$", *unitInclude))
+	if err != nil {
+		return nil, err
+	}
+
+	unitExcludePattern, err := regexp.Compile(fmt.Sprintf("^(?:%s)$", *unitExclude))
+	if err != nil {
+		return nil, err
+	}
 
 	// TODO: Build a custom handler to pass in the scrape http context.
 	ctx := context.TODO()

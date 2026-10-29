@@ -77,6 +77,11 @@ var (
 		"Resolved Total number of DNSSEC Verdicts Indeterminat",
 		nil, nil,
 	)
+	resolvedScrapeSuccess = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, subsystem, "scrape_success"),
+		"Whether the metric retrieval succeeded.",
+		nil, nil,
+	)
 )
 
 // NewCollector returns a new Collector exporing resolved statistics
@@ -95,6 +100,9 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	if err != nil {
 		c.logger.Error("error collecting resolved metrics",
 			"err", err.Error())
+		ch <- prometheus.MustNewConstMetric(resolvedScrapeSuccess, prometheus.GaugeValue, 0)
+	} else {
+		ch <- prometheus.MustNewConstMetric(resolvedScrapeSuccess, prometheus.GaugeValue, 1)
 	}
 }
 
@@ -109,6 +117,7 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- resolvedTotalInsecure
 	desc <- resolvedTotalBogus
 	desc <- resolvedTotalIndeterminate
+	desc <- resolvedScrapeSuccess
 }
 
 func parseProperty(object dbus.BusObject, path string) (ret []float64, err error) {

@@ -64,16 +64,10 @@ func main() {
 	r := prometheus.NewRegistry()
 
 	r.MustRegister(versioncollector.NewCollector("systemd_exporter"))
+	r.MustRegister(systemd.NewCollector(logger))
 
-	collector, err := systemd.NewCollector(logger)
-	if err != nil {
-		logger.Error("Couldn't create collector", "err", err)
-		os.Exit(1)
-	}
-
-	if err := r.Register(collector); err != nil {
-		logger.Error("Couldn't register systemd collector", "err", err)
-		os.Exit(1)
+	if *enableResolvedgMetrics {
+		r.MustRegister(resolved.NewCollector(logger))
 	}
 
 	handler := promhttp.HandlerFor(
@@ -88,18 +82,6 @@ func main() {
 		handler = promhttp.InstrumentMetricHandler(
 			exporterMetricsRegistry, handler,
 		)
-	}
-	if *enableResolvedgMetrics {
-		resolvedCollector, err := resolved.NewCollector(logger)
-		if err != nil {
-			logger.Error("Couldn't create resolved collector", "err", err)
-			os.Exit(1)
-		}
-
-		if err := r.Register(resolvedCollector); err != nil {
-			logger.Error("Couldn't register resolved collector", "err", err)
-			os.Exit(1)
-		}
 	}
 
 	http.Handle(*metricsPath, handler)

@@ -358,6 +358,33 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	return nil
 }
 
+// parseManagerTimestamp parses a systemd manager timestamp property (in
+// microseconds) as returned by GetManagerProperty, e.g. `"@t 123456"`.
+func parseManagerTimestamp(raw string) (float64, error) {
+	value := strings.TrimPrefix(strings.TrimSuffix(raw, `"`), `"`)
+	return strconv.ParseFloat(strings.TrimLeft(value, "@t "), 64)
+}
+
+// bootStageMonotonicSeconds converts the raw <stage>TimestampMonotonic manager
+// property to seconds relative to kernel start. systemd reports the Firmware
+// and Loader stages, which happen before the kernel starts, as positive
+// offsets that are to be read as negative values, see
+// https://www.freedesktop.org/wiki/Software/systemd/dbus/
+func bootStageMonotonicSeconds(stage, raw string) (float64, error) {
+	v, err := parseManagerTimestamp(raw)
+	if err != nil {
+		return 0, err
+	}
+	seconds := v / 1e6
+	switch stage {
+	case "Firmware", "Loader":
+		if seconds != 0 {
+			seconds = -seconds
+		}
+	}
+	return seconds, nil
+}
+
 func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- prometheus.Metric) error {
 	stages := []string{"Finish", "Firmware", "Loader", "Kernel", "InitRD",
 		"InitRDGeneratorsStart", "InitRDGeneratorsFinish",
@@ -378,24 +405,21 @@ func (c *Collector) collectBootStageTimestamps(conn *dbus.Conn, ch chan<- promet
 			return err
 		}
 
-		stageMonotonic := strings.TrimPrefix(strings.TrimSuffix(stageMonotonicValue, `"`), `"`)
-		stageTimestamp := strings.TrimPrefix(strings.TrimSuffix(stageTimestampValue, `"`), `"`)
-
-		vMonotonic, err := strconv.ParseFloat(strings.TrimLeft(stageMonotonic, "@t "), 64)
+		vMonotonic, err := bootStageMonotonicSeconds(stage, stageMonotonicValue)
 		if err != nil {
 			return err
 		}
 
-		vTimestamp, err := strconv.ParseFloat(strings.TrimLeft(stageTimestamp, "@t "), 64)
+		vTimestamp, err := parseManagerTimestamp(stageTimestampValue)
 		if err != nil {
 			return err
 		}
 
 		ch <- prometheus.MustNewConstMetric(
-			c.systemdBootMonotonic, prometheus.GaugeValue, float64(vMonotonic)/1e6,
+			c.systemdBootMonotonic, prometheus.GaugeValue, vMonotonic,
 			stage)
 		ch <- prometheus.MustNewConstMetric(
-			c.systemdBootTime, prometheus.GaugeValue, float64(vTimestamp)/1e6,
+			c.systemdBootTime, prometheus.GaugeValue, vTimestamp/1e6,
 			stage)
 	}
 

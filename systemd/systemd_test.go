@@ -13,7 +13,10 @@
 
 package systemd
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestParseSystemdVersion(t *testing.T) {
 	cases := []struct {
@@ -53,5 +56,39 @@ func TestParseSystemdVersionErrors(t *testing.T) {
 				t.Errorf("parseSystemdVersion(%q) expected error, got nil", raw)
 			}
 		})
+	}
+}
+
+func TestBootStageMonotonicSeconds(t *testing.T) {
+	cases := []struct {
+		stage string
+		raw   string
+		want  float64
+	}{
+		{"Firmware", `"@t 7417151"`, -7.417151},
+		{"Loader", `"@t 2531962"`, -2.531962},
+		{"Firmware", `"@t 0"`, 0},
+		{"Kernel", `"@t 0"`, 0},
+		{"Userspace", `"@t 3612542"`, 3.612542},
+		{"Finish", "1500000", 1.5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.stage+" "+tc.raw, func(t *testing.T) {
+			got, err := bootStageMonotonicSeconds(tc.stage, tc.raw)
+			if err != nil {
+				t.Fatalf("bootStageMonotonicSeconds(%q, %q) unexpected error: %v", tc.stage, tc.raw, err)
+			}
+			if got != tc.want {
+				t.Errorf("bootStageMonotonicSeconds(%q, %q) = %v, want %v", tc.stage, tc.raw, got, tc.want)
+			}
+			if got == 0 && math.Signbit(got) {
+				t.Errorf("bootStageMonotonicSeconds(%q, %q) returned negative zero", tc.stage, tc.raw)
+			}
+		})
+	}
+
+	if _, err := bootStageMonotonicSeconds("Firmware", `"bogus"`); err == nil {
+		t.Error("expected an error for an unparsable value")
 	}
 }

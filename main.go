@@ -20,6 +20,7 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus-community/systemd_exporter/systemd"
+	"github.com/prometheus-community/systemd_exporter/systemd/logind"
 	"github.com/prometheus-community/systemd_exporter/systemd/resolved"
 	"github.com/prometheus/client_golang/prometheus"
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
@@ -46,6 +47,7 @@ func main() {
 			"Maximum number of parallel scrape requests. Use 0 to disable.",
 		).Default("40").Int()
 		enableResolvedgMetrics = kingpin.Flag("systemd.collector.enable-resolved", "Enable systemd-resolved statistics").Bool()
+		enableLogindMetrics    = kingpin.Flag("systemd.collector.enable-logind", "Enable systemd-logind statistics").Bool()
 
 		toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
 	)
@@ -98,6 +100,18 @@ func main() {
 
 		if err := r.Register(resolvedCollector); err != nil {
 			logger.Error("Couldn't register resolved collector", "err", err)
+			os.Exit(1)
+		}
+	}
+	if *enableLogindMetrics {
+		logindCollector, err := logind.NewCollector(logger)
+		if err != nil {
+			logger.Error("Couldn't create logind collector", "err", err)
+			os.Exit(1)
+		}
+
+		if err := r.Register(logindCollector); err != nil {
+			logger.Error("Couldn't register logind collector", "err", err)
 			os.Exit(1)
 		}
 	}

@@ -86,6 +86,8 @@ type Collector struct {
 	ipEgressBytes                 *prometheus.Desc
 	ipIngressPackets              *prometheus.Desc
 	ipEgressPackets               *prometheus.Desc
+	scrapeDurationDesc            *prometheus.Desc
+	scrapeSuccessDesc             *prometheus.Desc
 	watchdogEnabled               *prometheus.Desc
 	watchdogLastPingMonotonic     *prometheus.Desc
 	watchdogLastPingTimestamp     *prometheus.Desc
@@ -211,6 +213,16 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		"Service unit egress IP accounting in packets.",
 		[]string{"name"}, nil,
 	)
+	scrapeDurationDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "exporter", "collector_duration_seconds"),
+		"systemd_exporter: Duration of a systemd collector scrape.",
+		[]string{"collector"}, nil,
+	)
+	scrapeSuccessDesc := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "exporter", "collector_success"),
+		"systemd_exporter: Whether the systemd collector succeeded.",
+		[]string{"collector"}, nil,
+	)
 	watchdogEnabled := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, watchdogSubsystem, "enabled"),
 		"systemd watchdog enabled",
@@ -261,6 +273,8 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		ipEgressBytes:                 ipEgressBytes,
 		ipIngressPackets:              ipIngressPackets,
 		ipEgressPackets:               ipEgressPackets,
+		scrapeSuccessDesc:             scrapeSuccessDesc,
+		scrapeDurationDesc:            scrapeDurationDesc,
 		unitIncludePattern:            unitIncludePattern,
 		unitExcludePattern:            unitExcludePattern,
 		watchdogEnabled:               watchdogEnabled,
@@ -272,10 +286,19 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 
 // Collect gathers metrics from systemd.
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
+	begin := time.Now()
+
 	err := c.collect(ch)
 	if err != nil {
 		c.logger.Error("error collecting metrics", "err", err.Error())
+		ch <- prometheus.MustNewConstMetric(
+			c.scrapeSuccessDesc, prometheus.GaugeValue, 0, namespace)
+	} else {
+		ch <- prometheus.MustNewConstMetric(
+			c.scrapeSuccessDesc, prometheus.GaugeValue, 1, namespace)
 	}
+
+	ch <- prometheus.MustNewConstMetric(c.scrapeDurationDesc, prometheus.GaugeValue, time.Since(begin).Seconds(), namespace)
 }
 
 // Describe gathers descriptions of Metrics
@@ -298,6 +321,8 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
 	desc <- c.ipEgressPackets
+	desc <- c.scrapeDurationDesc
+	desc <- c.scrapeSuccessDesc
 	desc <- c.watchdogEnabled
 	desc <- c.watchdogLastPingMonotonic
 	desc <- c.watchdogLastPingTimestamp

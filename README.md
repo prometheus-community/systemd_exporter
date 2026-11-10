@@ -56,6 +56,8 @@ Name     | Description |
 --systemd.collector.enable-restart-count | Enables service restart count metrics. This feature only works with systemd 235 and above.
 --systemd.collector.enable-file-descriptor-size | Enables file descriptor size metrics. Systemd Exporter needs access to /proc/X/fd files.
 --systemd.collector.enable-ip-accounting | Enables service ip accounting metrics. This feature only works with systemd 235 and above.
+--systemd.collector.enable-start-time-metrics | Enables service start time metrics. Enabled by default, disable with `--no-systemd.collector.enable-start-time-metrics`.
+--systemd.collector.enable-task-metrics | Enables service task metrics. Enabled by default, disable with `--no-systemd.collector.enable-task-metrics`.
 
 Of note, there is no customized support for `.snapshot` (removed in systemd v228), `.busname` (only present on systems using kdbus), `generated` (created via generators), `transient` (created during systemd-run) have no special support. 
 

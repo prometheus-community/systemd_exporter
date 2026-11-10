@@ -13,7 +13,13 @@
 
 package systemd
 
-import "testing"
+import (
+	"log/slog"
+	"testing"
+
+	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 func TestParseSystemdVersion(t *testing.T) {
 	cases := []struct {
@@ -53,5 +59,42 @@ func TestParseSystemdVersionErrors(t *testing.T) {
 				t.Errorf("parseSystemdVersion(%q) expected error, got nil", raw)
 			}
 		})
+	}
+}
+
+func TestCollectUnitStateEmitsFiveSeries(t *testing.T) {
+	c, err := NewCollector(slog.Default())
+	if err != nil {
+		t.Fatalf("NewCollector: %v", err)
+	}
+
+	ch := make(chan prometheus.Metric, 8)
+	unit := dbus.UnitStatus{Name: "foo.service", ActiveState: "active"}
+	if err := c.collectUnitState(ch, unit); err != nil {
+		t.Fatalf("collectUnitState: %v", err)
+	}
+	close(ch)
+
+	var n int
+	for range ch {
+		n++
+	}
+	if n != len(unitStatesName) {
+		t.Fatalf("got %d series, want %d", n, len(unitStatesName))
+	}
+}
+
+func TestShouldCollectUnitStateRespectsDisableFlag(t *testing.T) {
+	orig := *disableUnitState
+	t.Cleanup(func() { *disableUnitState = orig })
+
+	*disableUnitState = false
+	if !shouldCollectUnitState() {
+		t.Fatal("shouldCollectUnitState() = false, want true when disable-unit-state is unset")
+	}
+
+	*disableUnitState = true
+	if shouldCollectUnitState() {
+		t.Fatal("shouldCollectUnitState() = true, want false when disable-unit-state is set")
 	}
 }

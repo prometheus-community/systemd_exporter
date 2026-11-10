@@ -1,0 +1,29 @@
+services:
+  systemd-exporter:
+    container_name: systemd-exporter
+    image: prometheuscommunity/systemd-exporter:main
+    pull_policy: always
+    privileged: false
+    command:
+      - "--systemd.collector.private"
+    ports:
+      - "9558:9558"
+    user: root
+    restart: unless-stopped
+    volumes:
+      - type: "bind"
+        source: "/proc"
+        target: "/host/proc"
+        read_only: true
+      - type: "bind"
+        source: "/run/systemd"
+        target: "/run/systemd"
+        read_only: true
+      - type: "bind"
+        source: "/var/run"
+        target: "/var/run"
+        read_only: true
+      - type: "bind"
+        source: "/sys/fs/cgroup"
+        target: "/sys/fs/cgroup"
+        read_only: true

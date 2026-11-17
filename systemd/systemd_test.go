@@ -55,3 +55,12 @@ func TestParseSystemdVersionErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestMetricsEnabledByDefault(t *testing.T) {
+	if !*enableStartTimeMetrics {
+		t.Error("start time metrics should be enabled by default")
+	}
+	if !*enableTaskMetrics {
+		t.Error("task metrics should be enabled by default")
+	}
+}

@@ -1,5 +1,7 @@
 ## main / unreleased
 
+* [ENHANCEMENT] Add flags to enable or disable service start-time and task metrics #30
+
 ## 0.7.0 / 2025-03-14
 
 * [CHANGE] Used TrimLeft instead of regex for boot times metrics #124

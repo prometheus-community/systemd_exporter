@@ -45,7 +45,17 @@ func main() {
 			"web.max-requests",
 			"Maximum number of parallel scrape requests. Use 0 to disable.",
 		).Default("40").Int()
-		enableResolvedgMetrics = kingpin.Flag("systemd.collector.enable-resolved", "Enable systemd-resolved statistics").Bool()
+		enableResolvedMetrics = kingpin.Flag(
+			"systemd.collector.enable-resolved",
+			"Enable systemd-resolved statistics.",
+		).Bool()
+		resolvedBackend = kingpin.Flag(
+			"collector.resolved.backend",
+			"Backend for the resolved collector: \"dbus\" (default) or \"cli\". "+
+				"The CLI backend runs `resolvectl statistics --json=short` and exposes "+
+				"four additional timeout/failed-response metrics that are absent from "+
+				"the D-Bus TransactionStatistics property.",
+		).Default("dbus").String()
 
 		toolkitFlags = webflag.AddFlags(kingpin.CommandLine, ":9558")
 	)
@@ -89,8 +99,9 @@ func main() {
 			exporterMetricsRegistry, handler,
 		)
 	}
-	if *enableResolvedgMetrics {
-		resolvedCollector, err := resolved.NewCollector(logger)
+
+	if *enableResolvedMetrics {
+		resolvedCollector, err := resolved.NewCollector(logger, *resolvedBackend)
 		if err != nil {
 			logger.Error("Couldn't create resolved collector", "err", err)
 			os.Exit(1)

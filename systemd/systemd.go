@@ -343,14 +343,20 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	c.logger.Debug("systemd filterUnits took", "seconds", time.Since(begin).Seconds())
 
 	var wg sync.WaitGroup
+	// guard dbus from overloading; only make 20 requests at a time
+	var sem = make(chan struct{}, 20)
 	wg.Add(len(units))
 	for _, unit := range units {
 		go func(unit dbus.UnitStatus) {
+			defer wg.Done()
+
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
 			err := c.collectUnit(conn, ch, unit)
 			if err != nil {
 				c.logger.Warn(errUnitMetricsMsg, "err", err.Error())
 			}
-			wg.Done()
 		}(unit)
 	}
 

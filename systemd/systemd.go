@@ -67,6 +67,7 @@ type Collector struct {
 	systemdBootMonotonic          *prometheus.Desc
 	systemdBootTime               *prometheus.Desc
 	systemdVersionDesc            *prometheus.Desc
+	unitsDesc                     *prometheus.Desc
 	unitCPUTotal                  *prometheus.Desc
 	unitState                     *prometheus.Desc
 	unitInfo                      *prometheus.Desc
@@ -104,6 +105,11 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 	systemdBootTime := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "boot_time_seconds"),
 		"Systemd boot stage timestamps", []string{"stage"}, nil,
+	)
+	units := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "units"),
+		"Number of systemd units grouped by their active state.",
+		[]string{"state"}, nil,
 	)
 	systemdVersion := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "version"),
@@ -242,6 +248,7 @@ func NewCollector(logger *slog.Logger) (*Collector, error) {
 		systemdBootMonotonic:          systemdBootMonotonic,
 		systemdBootTime:               systemdBootTime,
 		systemdVersionDesc:            systemdVersion,
+		unitsDesc:                     units,
 		unitCPUTotal:                  unitCPUTotal,
 		unitState:                     unitState,
 		unitInfo:                      unitInfo,
@@ -283,6 +290,7 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.systemdBootMonotonic
 	desc <- c.systemdBootTime
 	desc <- c.systemdVersionDesc
+	desc <- c.unitsDesc
 	desc <- c.unitCPUTotal
 	desc <- c.unitState
 	desc <- c.unitInfo
@@ -336,6 +344,10 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		return fmt.Errorf("could not get list of systemd units from dbus: %w", err)
 	}
+
+	// Summarise all loaded units by active state before per-unit filtering, so
+	// the totals reflect the whole system regardless of include/exclude patterns.
+	c.collectUnitStatesSummary(allUnits, ch)
 
 	c.logger.Debug("systemd ListUnits took", "seconds", time.Since(begin).Seconds())
 	begin = time.Now()
@@ -431,6 +443,33 @@ func (c *Collector) collectVersion(conn *dbus.Conn, ch chan<- prometheus.Metric)
 
 	ch <- prometheus.MustNewConstMetric(c.systemdVersionDesc, prometheus.GaugeValue, parsed, version)
 	return nil
+}
+
+// countUnitStates tallies units by their active state, keyed by the well-known
+// states in unitStatesName. Units in a state outside that set (e.g. "reloading")
+// are not counted, consistent with the per-unit systemd_unit_state metric.
+func countUnitStates(units []dbus.UnitStatus) map[string]int {
+	counts := make(map[string]int, len(unitStatesName))
+	for _, state := range unitStatesName {
+		counts[state] = 0
+	}
+	for _, unit := range units {
+		if _, ok := counts[unit.ActiveState]; ok {
+			counts[unit.ActiveState]++
+		}
+	}
+	return counts
+}
+
+// collectUnitStatesSummary emits systemd_units{state=...} as the number of units
+// in each active state, mirroring node_exporter's node_systemd_units. Every known
+// state is always emitted (0 when empty) so the series stay stable across scrapes.
+func (c *Collector) collectUnitStatesSummary(units []dbus.UnitStatus, ch chan<- prometheus.Metric) {
+	counts := countUnitStates(units)
+	for _, state := range unitStatesName {
+		ch <- prometheus.MustNewConstMetric(
+			c.unitsDesc, prometheus.GaugeValue, float64(counts[state]), state)
+	}
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {

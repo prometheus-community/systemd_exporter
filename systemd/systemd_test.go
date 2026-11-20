@@ -13,7 +13,11 @@
 
 package systemd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/coreos/go-systemd/v22/dbus"
+)
 
 func TestParseSystemdVersion(t *testing.T) {
 	cases := []struct {
@@ -53,5 +57,47 @@ func TestParseSystemdVersionErrors(t *testing.T) {
 				t.Errorf("parseSystemdVersion(%q) expected error, got nil", raw)
 			}
 		})
+	}
+}
+
+func TestCountUnitStates(t *testing.T) {
+	units := []dbus.UnitStatus{
+		{Name: "a.service", ActiveState: "active"},
+		{Name: "b.service", ActiveState: "active"},
+		{Name: "c.timer", ActiveState: "inactive"},
+		{Name: "d.service", ActiveState: "failed"},
+		{Name: "e.service", ActiveState: "activating"},
+		// A state outside unitStatesName must not be counted anywhere.
+		{Name: "f.service", ActiveState: "reloading"},
+	}
+
+	got := countUnitStates(units)
+	want := map[string]int{
+		"active":       2,
+		"activating":   1,
+		"deactivating": 0,
+		"inactive":     1,
+		"failed":       1,
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d states, want %d: %v", len(got), len(want), got)
+	}
+	for state, n := range want {
+		if got[state] != n {
+			t.Errorf("state %q = %d, want %d", state, got[state], n)
+		}
+	}
+}
+
+func TestCountUnitStatesEmpty(t *testing.T) {
+	got := countUnitStates(nil)
+	if len(got) != len(unitStatesName) {
+		t.Fatalf("got %d states, want %d", len(got), len(unitStatesName))
+	}
+	for _, state := range unitStatesName {
+		if got[state] != 0 {
+			t.Errorf("state %q = %d, want 0", state, got[state])
+		}
 	}
 }

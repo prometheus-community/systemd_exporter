@@ -31,7 +31,10 @@ spec:
           privileged: true
         args:
         - --log.level=info
-        - --collector.unit-include=kubelet.service|docker.service
+        - --systemd.collector.unit-include=kubelet.service|docker.service
+        # Alternative: use slice-based filtering
+        # - --systemd.collector.slice-include=system
+        # - --systemd.collector.unit-exclude=.*\.device
         ports:
         - name: metrics
           containerPort: 9558

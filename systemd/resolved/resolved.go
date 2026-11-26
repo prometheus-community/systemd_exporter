@@ -132,8 +132,10 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	defer conn.Close()
 
-	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
+	return collectStatistics(conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1"), ch)
+}
 
+func collectStatistics(obj dbus.BusObject, ch chan<- prometheus.Metric) error {
 	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
 	if err != nil {
 		return err
@@ -147,15 +149,18 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		float64(cacheStats[2]))
 
 	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	if err != nil {
+		return err
+	}
 	ch <- prometheus.MustNewConstMetric(resolvedCurrentTransactions, prometheus.GaugeValue,
 		float64(transactionStats[0]))
 	ch <- prometheus.MustNewConstMetric(resolvedTotalTransactions, prometheus.CounterValue,
 		float64(transactionStats[1]))
+
+	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
 	if err != nil {
 		return err
 	}
-
-	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
 	ch <- prometheus.MustNewConstMetric(resolvedTotalSecure, prometheus.CounterValue,
 		float64(dnssecStats[0]))
 	ch <- prometheus.MustNewConstMetric(resolvedTotalInsecure, prometheus.CounterValue,
@@ -164,8 +169,5 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		float64(dnssecStats[2]))
 	ch <- prometheus.MustNewConstMetric(resolvedTotalIndeterminate, prometheus.CounterValue,
 		float64(dnssecStats[3]))
-	if err != nil {
-		return err
-	}
 	return nil
 }
